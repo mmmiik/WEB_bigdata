@@ -1,10 +1,22 @@
 "use client"
 
-import { AlertTriangleIcon, UploadCloudIcon } from "lucide-react"
+import { Dialog } from "@base-ui/react/dialog"
+import { AlertTriangleIcon, UploadCloudIcon, XIcon } from "lucide-react"
 import * as React from "react"
 
-import { n, type EstadoFase } from "@/components/etl/comun"
-import { ConfiguracionExtraccion } from "@/components/etl/configuracion-extraccion"
+import { BotonTema } from "@/components/boton-tema"
+import {
+  Caja,
+  IconoEstado,
+  ms,
+  n,
+  type EstadoFase,
+} from "@/components/etl/comun"
+import {
+  alternarCiudad,
+  ConfiguracionExtraccion,
+} from "@/components/etl/configuracion-extraccion"
+import { MapaEspana, type Margenes } from "@/components/etl/mapa-espana"
 import {
   PestanaCarga,
   type EstadoCarga,
@@ -18,13 +30,14 @@ import {
   PestanaTransformados,
 } from "@/components/etl/pestanas-datos"
 import {
-  Contadores,
-  Pipeline,
-  ProgresoCiudades,
+  CiudadesConError,
+  PipelineCompacto,
+  Registro,
+  type EntradaRegistro,
   type InfoFase,
 } from "@/components/etl/pipeline"
 import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   aRegistroCarga,
@@ -139,6 +152,27 @@ async function consultarEstadoSupabase(): Promise<EstadoSupabase> {
   }
 }
 
+// --- Maquetación: mapa a pantalla completa con cajas a los lados ------------
+
+const CONSULTA_ANCHA = "(min-width: 1024px)"
+
+/** true en pantallas anchas, donde las cajas flotan sobre el mapa. */
+function usePantallaAncha() {
+  return React.useSyncExternalStore(
+    (avisar) => {
+      const mq = window.matchMedia(CONSULTA_ANCHA)
+      mq.addEventListener("change", avisar)
+      return () => mq.removeEventListener("change", avisar)
+    },
+    () => window.matchMedia(CONSULTA_ANCHA).matches,
+    () => true
+  )
+}
+
+// Ancho de las cajas (lg:w-[340px] y lg:w-[400px]) + separación de 16 px + aire.
+const MARGENES_ANCHA: Margenes = { top: 64, bottom: 96, left: 380, right: 440 }
+const MARGENES_ESTRECHA: Margenes = { top: 56, bottom: 88, left: 16, right: 16 }
+
 export function EtlWorkbench() {
   const [hoy] = React.useState(() => hoyUtc())
   const [ciudadesSel, setCiudadesSel] = React.useState<CiudadId[]>(
@@ -182,6 +216,23 @@ export function EtlWorkbench() {
   const [supabase, setSupabase] = React.useState<EstadoSupabase | null>(null)
 
   const [pestana, setPestana] = React.useState("json")
+  const [inspeccionAbierta, setInspeccionAbierta] = React.useState(false)
+  const inspeccionar = (p: string) => {
+    setPestana(p)
+    setInspeccionAbierta(true)
+  }
+
+  const [registro, setRegistro] = React.useState<EntradaRegistro[]>([])
+  const idRegistro = React.useRef(0)
+  const anotar = (nivel: EntradaRegistro["nivel"], texto: string) => {
+    const entrada: EntradaRegistro = {
+      id: ++idRegistro.current,
+      hora: new Date().toLocaleTimeString("es-ES"),
+      nivel,
+      texto,
+    }
+    setRegistro((r) => [...r, entrada].slice(-200))
+  }
 
   const leerEstadoSupabase = async () =>
     setSupabase(await consultarEstadoSupabase())
@@ -189,7 +240,15 @@ export function EtlWorkbench() {
   React.useEffect(() => {
     let activo = true
     consultarEstadoSupabase().then((e) => {
-      if (activo) setSupabase(e)
+      if (!activo) return
+      setSupabase(e)
+      if (e.configurado && e.tablaAccesible)
+        anotar("ok", `Supabase conectado · ${n(e.filas ?? 0)} filas en destino`)
+      else
+        anotar(
+          "error",
+          `Supabase no disponible: ${e.error ?? `faltan ${e.faltan?.join(", ") || "variables"}`}`
+        )
     })
     return () => {
       activo = false
@@ -230,6 +289,9 @@ export function EtlWorkbench() {
       descargadoEn:
         new Date().toLocaleString("es-ES", { timeZone: "UTC" }) + " UTC",
     })
+    const nombre = ciudadPorId(id).nombre
+    if (r.ok) anotar("ok", `${nombre}: JSON recibido (${ms(duracionMs)})`)
+    else anotar("error", `${nombre}: ${r.error}`)
   }
 
   /** Transformación y limpieza sobre todas las ciudades descargadas. */
@@ -239,6 +301,7 @@ export function EtlWorkbench() {
       .filter((e): e is ExtraccionCiudad => e?.estado === "completada")
       .map((e) => ({ ciudadId: e.ciudadId, json: e.json }))
     if (entradas.length === 0) {
+      anotar("error", "No hay ninguna ciudad descargada que transformar.")
       setLocal(null)
       setVista({ ordenados: [], msFiltrado: null })
       return
@@ -252,6 +315,16 @@ export function EtlWorkbench() {
     const t1 = performance.now()
     const limpieza = limpiar(transformacion.registros)
     const t2 = performance.now()
+    const problemas = transformacion.errores.length
+    anotar(
+      problemas > 0 ? "error" : "ok",
+      `Transformación: ${n(transformacion.registros.length)} registros (${ms(t1 - t0)})` +
+        (problemas > 0 ? ` · ${problemas} problema(s) de estructura` : "")
+    )
+    anotar(
+      "ok",
+      `Limpieza: ${n(limpieza.validos.length)} válidos · ${n(limpieza.rechazados.length)} rechazados`
+    )
     setLocal({
       transformacion,
       limpieza,
@@ -288,6 +361,10 @@ export function EtlWorkbench() {
     setFiltros(FILTROS_INICIALES)
     setExtrayendo(true)
     setPestana("json")
+    anotar(
+      "info",
+      `Extracción de ${ciudades.length} ciudad(es) · ${inicio} → ${fin}`
+    )
     // Peticiones en serie: se ve qué ciudad se procesa y cuáles quedan.
     for (const id of ciudades) await descargar(id)
     setExtrayendo(false)
@@ -342,6 +419,10 @@ export function EtlWorkbench() {
     msPrevios: number
   ) => {
     const t0 = performance.now()
+    anotar(
+      "info",
+      `Carga: ${n(snapshot.length)} registros en ${lotes.length} lote(s)`
+    )
     setCarga({
       snapshot,
       lotes,
@@ -353,6 +434,17 @@ export function EtlWorkbench() {
       setCarga((c) => (c ? { ...c, lotes: l } : c))
     )
     setCarga((c) => (c ? { ...c, lotes: finales, fase: "verificando" } : c))
+    const resumen = resumirCarga(finales)
+    if (resumen.fallidos > 0)
+      anotar(
+        "error",
+        `Carga: ${resumen.fallidos} lote(s) fallidos · ${n(resumen.registrosCorrectos)} registros confirmados`
+      )
+    else
+      anotar(
+        "ok",
+        `Carga: ${n(resumen.registrosCorrectos)} registros confirmados`
+      )
     const enviadas = finales
       .filter((l) => l.estado === "completado")
       .flatMap((l) =>
@@ -362,6 +454,13 @@ export function EtlWorkbench() {
       enviadas.length > 0
         ? await verificarClaves(enviadas, consultarClaves)
         : null
+    if (verificacion?.error)
+      anotar("error", `Verificación: ${verificacion.error}`)
+    else if (verificacion)
+      anotar(
+        verificacion.faltan.length > 0 ? "error" : "ok",
+        `Verificación: ${n(verificacion.encontradas)}/${n(verificacion.comprobadas)} claves en destino`
+      )
     setCarga((c) =>
       c
         ? {
@@ -567,208 +666,351 @@ export function EtlWorkbench() {
       ? "Extracción en curso…"
       : undefined
 
+  const pantallaAncha = usePantallaAncha()
+  const ocupado = extrayendo || cargando
+
+  // Las ciudades muestran en el mapa el estado de su última descarga.
+  const estadosCiudades = Object.fromEntries(
+    lista.map((e) => [e.ciudadId, e.estado])
+  ) as Partial<Record<CiudadId, EstadoFase>>
+
+  const estadoGlobal: EstadoFase = fases.some((f) => f.estado === "error")
+    ? "error"
+    : fases.some((f) => f.estado === "en_curso")
+      ? "en_curso"
+      : local
+        ? "completada"
+        : "pendiente"
+  const textoGlobal: Record<EstadoFase, string> = {
+    pendiente: "Sin ejecutar",
+    en_curso: "En curso",
+    completada: "Todo OK",
+    error: "Con errores",
+  }
+
+  const vistas = [
+    {
+      pestana: "json",
+      etiqueta: "JSON original",
+      valor: ejecucion ? descargadas.length : null,
+    },
+    {
+      pestana: "transformados",
+      etiqueta: "Transformados",
+      valor: local ? totalExtraido : null,
+    },
+    {
+      pestana: "validos",
+      etiqueta: "Válidos",
+      valor: local ? validos.length : null,
+    },
+    {
+      pestana: "rechazados",
+      etiqueta: "Rechazados",
+      valor: local ? rechazados : null,
+    },
+    {
+      pestana: "carga",
+      etiqueta: "Vista previa",
+      valor: local ? paraCargar.length : null,
+    },
+    {
+      pestana: "supabase",
+      etiqueta: "En Supabase",
+      valor: supabase?.filas ?? null,
+    },
+  ]
+
+  const textoSupabase = !supabase
+    ? "Comprobando Supabase…"
+    : supabaseDisponible
+      ? "Supabase conectado"
+      : !supabase.configurado
+        ? "Supabase no disponible"
+        : "Tabla no accesible"
+
   return (
-    <div className="mx-auto grid w-full max-w-[1400px] grid-cols-1 gap-6 px-4 py-6 sm:px-6">
-      <header className="grid grid-cols-1 gap-1">
-        <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-          Práctica de Big Data · Pipeline ETL
-        </p>
-        <h1 className="text-2xl font-semibold">Open-Meteo → Supabase</h1>
-        <p className="max-w-3xl text-sm text-muted-foreground">
-          Extrae datos meteorológicos horarios, observa qué ocurre con ellos en
-          cada fase y decide exactamente qué registros se guardan en la base de
-          datos.
-        </p>
-      </header>
-
-      <ConfiguracionExtraccion
-        ciudades={ciudadesSel}
-        onCiudades={setCiudadesSel}
-        inicio={inicio}
-        fin={fin}
-        onInicio={setInicio}
-        onFin={setFin}
-        periodo={periodo}
-        hoy={hoy}
-        ocupado={extrayendo || cargando}
-        motivoOcupado={motivoOcupado}
-        onExtraer={extraer}
+    <div className="relative flex min-h-svh flex-col lg:block lg:h-svh lg:overflow-hidden">
+      <MapaEspana
+        className="h-[65svh] shrink-0 lg:absolute lg:inset-0 lg:h-auto"
+        seleccionadas={ciudadesSel}
+        onAlternar={(id) => setCiudadesSel((c) => alternarCiudad(c, id))}
+        estados={estadosCiudades}
+        bloqueado={ocupado}
+        margenes={pantallaAncha ? MARGENES_ANCHA : MARGENES_ESTRECHA}
       />
 
-      <Pipeline fases={fases} onInspeccionar={setPestana} />
-
-      {ejecucion && (
-        <ProgresoCiudades
-          orden={ejecucion.ciudades}
-          extracciones={extracciones}
-          onReintentar={reintentarCiudad}
-          bloqueado={extrayendo || cargando}
-        />
-      )}
-
-      {local && validos.length > 0 && (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/40 bg-card p-3">
-          <div className="text-sm">
-            <p className="font-medium">
-              Carga directa de todos los registros válidos
-            </p>
-            <p className="text-muted-foreground">
-              {supabaseDisponible
-                ? `Restablece los filtros, selecciona los ${n(validos.length)} registros válidos y los sube en lotes de 500 (upsert, sin duplicados).`
-                : "Disponible cuando Supabase esté configurado (SUPABASE_URL y SUPABASE_SECRET_KEY en .env.local)."}
-            </p>
-          </div>
-          <Button
-            size="lg"
-            disabled={!supabaseDisponible || cargando || extrayendo}
-            onClick={subirTodos}
-          >
-            <UploadCloudIcon data-icon="inline-start" />
-            Subir los {n(validos.length)} registros válidos a Supabase
-          </Button>
-        </div>
-      )}
-
-      <Contadores
-        contadores={[
-          {
-            etiqueta: "Total extraído",
-            valor: local ? totalExtraido : null,
-            ayuda: "Registros ciudad-hora recibidos",
-          },
-          {
-            etiqueta: "Válidos",
-            valor: local ? validos.length : null,
-            ayuda: "Superan la limpieza",
-          },
-          {
-            etiqueta: "Rechazados",
-            valor: local ? rechazados : null,
-            ayuda: "Descartados por calidad",
-          },
-          {
-            etiqueta: "Coinciden con los filtros",
-            valor: local ? ordenados.length : null,
-            ayuda: `${n(Math.max(0, validos.length - ordenados.length))} excluidos por filtros`,
-          },
-          {
-            etiqueta: "Seleccionados para cargar",
-            valor: local ? paraCargar.length : null,
-            ayuda: "Seleccionados que cumplen los filtros",
-            destacado: true,
-            nota:
-              fueraDeFiltros > 0 ? (
-                <span className="inline-flex items-center gap-1 text-amber-800 dark:text-amber-300">
-                  <AlertTriangleIcon className="size-3.5" aria-hidden />
-                  {n(fueraDeFiltros)} seleccionados fuera de filtros (no se
-                  suben)
+      <div className="grid gap-4 p-4 lg:contents">
+        {/* Izquierda: qué se extrae */}
+        <aside className="lg:absolute lg:top-4 lg:left-4 lg:flex lg:max-h-[calc(100svh-2rem)] lg:w-[340px] lg:flex-col">
+          <Caja
+            titulo={
+              <span className="grid">
+                <span className="text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+                  Práctica de Big Data · Pipeline ETL
                 </span>
-              ) : undefined,
-          },
-        ]}
-      />
+                <span className="text-base">Open-Meteo → Supabase</span>
+              </span>
+            }
+            accion={<BotonTema />}
+          >
+            <ConfiguracionExtraccion
+              ciudades={ciudadesSel}
+              onCiudades={setCiudadesSel}
+              inicio={inicio}
+              fin={fin}
+              onInicio={setInicio}
+              onFin={setFin}
+              periodo={periodo}
+              hoy={hoy}
+              ocupado={ocupado}
+              motivoOcupado={motivoOcupado}
+              onExtraer={extraer}
+            />
+          </Caja>
+        </aside>
 
-      <section
-        aria-labelledby="titulo-inspeccion"
-        className="grid grid-cols-1 gap-3"
-      >
-        <h2
-          id="titulo-inspeccion"
-          className="flex items-center gap-2 text-base font-medium"
-        >
-          <span className="flex size-6 items-center justify-center rounded-full bg-primary text-xs text-primary-foreground">
-            3
-          </span>
-          Inspección de datos
-        </h2>
-        <Tabs value={pestana} onValueChange={(v) => setPestana(String(v))}>
-          <div className="overflow-x-auto pb-1">
-            <TabsList>
-              <TabsTrigger value="json">JSON original</TabsTrigger>
-              <TabsTrigger value="transformados">
-                Transformados{" "}
-                {local && <Badge variant="secondary">{n(totalExtraido)}</Badge>}
-              </TabsTrigger>
-              <TabsTrigger value="validos">
-                Registros válidos{" "}
-                {local && (
-                  <Badge variant="secondary">{n(validos.length)}</Badge>
-                )}
-              </TabsTrigger>
-              <TabsTrigger value="rechazados">
-                Rechazados{" "}
-                {local && <Badge variant="secondary">{n(rechazados)}</Badge>}
-              </TabsTrigger>
-              <TabsTrigger value="carga">
-                Vista previa de la carga{" "}
-                {local && (
-                  <Badge variant="secondary">{n(paraCargar.length)}</Badge>
-                )}
-              </TabsTrigger>
-              <TabsTrigger value="supabase">Datos en Supabase</TabsTrigger>
-            </TabsList>
+        {/* Derecha: pipeline y registro; debajo, inspección y subida */}
+        <div className="grid gap-4 lg:absolute lg:top-4 lg:right-4 lg:bottom-4 lg:w-[400px] lg:grid-rows-[minmax(0,1fr)_auto] lg:gap-3">
+          <Caja
+            titulo="Pipeline"
+            accion={
+              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <IconoEstado estado={estadoGlobal} className="size-3.5" />
+                <span aria-hidden>{textoGlobal[estadoGlobal]}</span>
+              </span>
+            }
+            cuerpoClassName="grid content-start gap-3 p-2"
+          >
+            <PipelineCompacto fases={fases} onInspeccionar={inspeccionar} />
+            <CiudadesConError
+              fallidas={conError}
+              onReintentar={(e) => reintentarCiudad(e.ciudadId)}
+              bloqueado={ocupado}
+            />
+            <div className="grid gap-1.5 border-t border-black/5 px-2 pt-3 dark:border-white/5">
+              <h3 className="text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+                Registro
+              </h3>
+              <Registro entradas={registro} />
+            </div>
+          </Caja>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Caja titulo="Inspección de datos" cuerpoClassName="p-1.5">
+              <ul className="grid">
+                {vistas.map((v) => (
+                  <li key={v.pestana}>
+                    <button
+                      type="button"
+                      onClick={() => inspeccionar(v.pestana)}
+                      className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1 text-xs transition-colors outline-none hover:bg-black/5 focus-visible:ring-3 focus-visible:ring-ring/50 dark:hover:bg-white/5"
+                    >
+                      <span>{v.etiqueta}</span>
+                      <span className="text-muted-foreground tabular-nums">
+                        {v.valor === null ? "—" : n(v.valor)}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </Caja>
+
+            <Caja
+              titulo="Subida de registros"
+              cuerpoClassName="grid content-start gap-2 p-3 text-xs"
+            >
+              <p className="flex items-center gap-1.5" title={supabase?.error}>
+                <IconoEstado
+                  estado={
+                    !supabase
+                      ? "en_curso"
+                      : supabaseDisponible
+                        ? "completada"
+                        : "error"
+                  }
+                  className="size-3.5"
+                />
+                <span aria-hidden>{textoSupabase}</span>
+              </p>
+              <dl className="grid grid-cols-[1fr_auto] gap-x-2 tabular-nums">
+                <dt className="text-muted-foreground">Válidos</dt>
+                <dd>{local ? n(validos.length) : "—"}</dd>
+                <dt className="text-muted-foreground">Seleccionados</dt>
+                <dd>{local ? n(paraCargar.length) : "—"}</dd>
+              </dl>
+              {fueraDeFiltros > 0 && (
+                <p className="flex items-start gap-1 text-amber-800 dark:text-amber-300">
+                  <AlertTriangleIcon
+                    className="mt-px size-3.5 shrink-0"
+                    aria-hidden
+                  />
+                  {n(fueraDeFiltros)} fuera de filtros (no se suben)
+                </p>
+              )}
+              <Button
+                size="sm"
+                disabled={
+                  !supabaseDisponible || ocupado || validos.length === 0
+                }
+                onClick={subirTodos}
+                title="Restablece los filtros y sube todos los registros válidos en lotes de 500 (upsert, sin duplicados)."
+              >
+                <UploadCloudIcon data-icon="inline-start" />
+                Subir todos
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={
+                  !supabaseDisponible || ocupado || paraCargar.length === 0
+                }
+                onClick={subir}
+              >
+                Subir selección
+              </Button>
+              {carga && resumenCarga && (
+                <p className="flex items-center gap-1.5 tabular-nums">
+                  <IconoEstado estado={fases[4].estado} className="size-3.5" />
+                  Lotes {resumenCarga.completados}/{resumenCarga.lotes}
+                  {carga.verificacion &&
+                    ` · ${n(carga.verificacion.encontradas)} verif.`}
+                </p>
+              )}
+              <Button
+                variant="link"
+                size="xs"
+                className="h-auto justify-self-start px-0"
+                onClick={() => inspeccionar("carga")}
+              >
+                Ver detalles
+              </Button>
+            </Caja>
           </div>
-          <div className="rounded-xl border bg-card p-3 sm:p-4">
-            <TabsContent value="json">
-              <PestanaJson
-                orden={ejecucion?.ciudades ?? []}
-                extracciones={extracciones}
-                inicio={ejecucion?.inicio ?? inicio}
-                fin={ejecucion?.fin ?? fin}
-              />
-            </TabsContent>
-            <TabsContent value="transformados">
-              <PestanaTransformados
-                transformacion={local?.transformacion ?? null}
-              />
-            </TabsContent>
-            <TabsContent value="validos">
-              <PestanaValidos
-                totalValidos={validos.length}
-                ciudadesDisponibles={ciudadesDisponibles}
-                ordenados={ordenados}
-                filtros={filtros}
-                onFiltros={cambiarFiltros}
-                interpretados={interpretados}
-                orden={orden}
-                onOrden={cambiarOrden}
-                seleccion={seleccion}
-                onSeleccion={setSeleccion}
-                seleccionadosParaCargar={paraCargar.length}
-                fueraDeFiltros={fueraDeFiltros}
-              />
-            </TabsContent>
-            <TabsContent value="rechazados">
-              <PestanaRechazados
-                limpieza={local?.limpieza ?? null}
-                excluidosPorFiltros={Math.max(
-                  0,
-                  validos.length - ordenados.length
-                )}
-              />
-            </TabsContent>
-            <TabsContent value="carga">
-              <PestanaCarga
-                supabase={supabase}
-                paraCargar={registrosParaCargar}
-                carga={carga}
-                enCurso={cargando}
-                onSubir={subir}
-                totalValidos={validos.length}
-                onSubirTodos={subirTodos}
-                onReintentar={reintentarLotes}
-              />
-            </TabsContent>
-            <TabsContent value="supabase">
-              <PestanaSupabase
-                supabase={supabase}
-                pendientesLocales={paraCargar.length}
-                version={versionDestino}
-              />
-            </TabsContent>
-          </div>
-        </Tabs>
-      </section>
+        </div>
+      </div>
+
+      <Dialog.Root open={inspeccionAbierta} onOpenChange={setInspeccionAbierta}>
+        <Dialog.Portal>
+          <Dialog.Backdrop className="fixed inset-0 z-40 bg-black/25 backdrop-blur-[2px]" />
+          <Dialog.Popup className="fixed inset-3 z-50 flex flex-col overflow-hidden rounded-2xl border border-white/60 bg-background/90 shadow-2xl backdrop-blur-xl outline-none sm:inset-6 lg:inset-10 dark:border-white/10">
+            <header className="flex items-center justify-between gap-2 border-b px-4 py-3">
+              <Dialog.Title className="text-base font-semibold">
+                Inspección de datos
+              </Dialog.Title>
+              <Dialog.Close
+                aria-label="Cerrar"
+                className={buttonVariants({
+                  variant: "ghost",
+                  size: "icon-sm",
+                })}
+              >
+                <XIcon />
+              </Dialog.Close>
+            </header>
+            <div className="min-h-0 flex-1 overflow-auto p-4">
+              <Tabs
+                value={pestana}
+                onValueChange={(v) => setPestana(String(v))}
+              >
+                <div className="overflow-x-auto pb-1">
+                  <TabsList>
+                    <TabsTrigger value="json">JSON original</TabsTrigger>
+                    <TabsTrigger value="transformados">
+                      Transformados{" "}
+                      {local && (
+                        <Badge variant="secondary">{n(totalExtraido)}</Badge>
+                      )}
+                    </TabsTrigger>
+                    <TabsTrigger value="validos">
+                      Registros válidos{" "}
+                      {local && (
+                        <Badge variant="secondary">{n(validos.length)}</Badge>
+                      )}
+                    </TabsTrigger>
+                    <TabsTrigger value="rechazados">
+                      Rechazados{" "}
+                      {local && (
+                        <Badge variant="secondary">{n(rechazados)}</Badge>
+                      )}
+                    </TabsTrigger>
+                    <TabsTrigger value="carga">
+                      Vista previa de la carga{" "}
+                      {local && (
+                        <Badge variant="secondary">
+                          {n(paraCargar.length)}
+                        </Badge>
+                      )}
+                    </TabsTrigger>
+                    <TabsTrigger value="supabase">
+                      Datos en Supabase
+                    </TabsTrigger>
+                  </TabsList>
+                </div>
+                <div className="rounded-xl border bg-card p-3 sm:p-4">
+                  <TabsContent value="json">
+                    <PestanaJson
+                      orden={ejecucion?.ciudades ?? []}
+                      extracciones={extracciones}
+                      inicio={ejecucion?.inicio ?? inicio}
+                      fin={ejecucion?.fin ?? fin}
+                    />
+                  </TabsContent>
+                  <TabsContent value="transformados">
+                    <PestanaTransformados
+                      transformacion={local?.transformacion ?? null}
+                    />
+                  </TabsContent>
+                  <TabsContent value="validos">
+                    <PestanaValidos
+                      totalValidos={validos.length}
+                      ciudadesDisponibles={ciudadesDisponibles}
+                      ordenados={ordenados}
+                      filtros={filtros}
+                      onFiltros={cambiarFiltros}
+                      interpretados={interpretados}
+                      orden={orden}
+                      onOrden={cambiarOrden}
+                      seleccion={seleccion}
+                      onSeleccion={setSeleccion}
+                      seleccionadosParaCargar={paraCargar.length}
+                      fueraDeFiltros={fueraDeFiltros}
+                    />
+                  </TabsContent>
+                  <TabsContent value="rechazados">
+                    <PestanaRechazados
+                      limpieza={local?.limpieza ?? null}
+                      excluidosPorFiltros={Math.max(
+                        0,
+                        validos.length - ordenados.length
+                      )}
+                    />
+                  </TabsContent>
+                  <TabsContent value="carga">
+                    <PestanaCarga
+                      supabase={supabase}
+                      paraCargar={registrosParaCargar}
+                      carga={carga}
+                      enCurso={cargando}
+                      onSubir={subir}
+                      totalValidos={validos.length}
+                      onSubirTodos={subirTodos}
+                      onReintentar={reintentarLotes}
+                    />
+                  </TabsContent>
+                  <TabsContent value="supabase">
+                    <PestanaSupabase
+                      supabase={supabase}
+                      pendientesLocales={paraCargar.length}
+                      version={versionDestino}
+                    />
+                  </TabsContent>
+                </div>
+              </Tabs>
+            </div>
+          </Dialog.Popup>
+        </Dialog.Portal>
+      </Dialog.Root>
     </div>
   )
 }

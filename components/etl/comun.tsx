@@ -78,6 +78,77 @@ export function BadgeEstado({
   )
 }
 
+const COLOR_ESTADO: Record<EstadoFase, string> = {
+  pendiente: "text-muted-foreground",
+  en_curso: "text-sky-600 dark:text-sky-400",
+  completada: "text-emerald-600 dark:text-emerald-400",
+  error: "text-red-600 dark:text-red-400",
+}
+
+/** Versión compacta de BadgeEstado: solo icono, con el texto para lectores de pantalla. */
+export function IconoEstado({
+  estado,
+  className,
+}: {
+  estado: EstadoFase
+  className?: string
+}) {
+  const Icono = ESTADOS[estado].icono
+  return (
+    <>
+      <Icono
+        aria-hidden
+        className={cn(
+          "size-4 shrink-0",
+          COLOR_ESTADO[estado],
+          estado === "en_curso" && "animate-spin",
+          className
+        )}
+      />
+      <span className="sr-only">{ESTADOS[estado].texto}</span>
+    </>
+  )
+}
+
+/** Vidrio esmerilado: se apoya sobre el mapa y deja intuirlo detrás. */
+export const VIDRIO =
+  "border border-white/60 bg-white/55 shadow-lg shadow-black/5 backdrop-blur-xl backdrop-saturate-150 dark:border-white/10 dark:bg-zinc-900/55 dark:shadow-black/30"
+
+/** Caja rectangular de los laterales. */
+export function Caja({
+  titulo,
+  accion,
+  className,
+  cuerpoClassName,
+  children,
+}: {
+  titulo: React.ReactNode
+  accion?: React.ReactNode
+  className?: string
+  cuerpoClassName?: string
+  children: React.ReactNode
+}) {
+  return (
+    <section
+      className={cn(
+        "flex min-h-0 flex-col overflow-hidden rounded-2xl",
+        VIDRIO,
+        className
+      )}
+    >
+      <header className="flex items-center justify-between gap-2 border-b border-black/5 px-4 py-2.5 dark:border-white/5">
+        <h2 className="text-sm font-semibold">{titulo}</h2>
+        {accion}
+      </header>
+      <div
+        className={cn("min-h-0 flex-1 overflow-y-auto p-4", cuerpoClassName)}
+      >
+        {children}
+      </div>
+    </section>
+  )
+}
+
 const fmtEntero = new Intl.NumberFormat("es-ES")
 const fmtDecimal = new Intl.NumberFormat("es-ES", { maximumFractionDigits: 2 })
 
