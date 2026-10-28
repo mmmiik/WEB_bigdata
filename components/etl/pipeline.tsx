@@ -1,30 +1,56 @@
 "use client"
 
-import { RotateCcwIcon } from "lucide-react"
+import { Popover } from "@base-ui/react/popover"
+import {
+  ArrowCounterClockwiseIcon,
+  CaretRightIcon,
+  CheckCircleIcon,
+  InfoIcon,
+  WarningCircleIcon,
+} from "@phosphor-icons/react"
 import * as React from "react"
 
-import { IconoEstado, ms, n, type EstadoFase } from "@/components/etl/comun"
+import {
+  GRUPO,
+  IconoEstado,
+  ms,
+  n,
+  Seccion,
+  VIDRIO_OPACO,
+  type EstadoFase,
+} from "@/components/etl/comun"
 import { Button } from "@/components/ui/button"
 import { ciudadPorId } from "@/lib/etl/ciudades"
 import type { ExtraccionCiudad } from "@/lib/etl/extraccion"
 import { cn } from "@/lib/utils"
 
+export interface Cifra {
+  valor: number
+  etiqueta: string
+}
+
 export interface InfoFase {
   id: string
   titulo: string
+  /** Qué hace la fase: se lee en el popup de la fase. */
   explicacion: string
-  estado: EstadoFase
-  entrada: { valor: number; etiqueta: string } | null
-  salida: { valor: number; etiqueta: string } | null
-  duracionMs: number | null
+  /** Dato de la última ejecución; en curso o con error también se ve en la fila. */
+  nota?: { texto: string; error?: boolean }
+  /** Contenido extra del popup, p. ej. las ciudades que reintentar. */
   detalle?: React.ReactNode
+  estado: EstadoFase
+  entrada: Cifra | null
+  salida: Cifra | null
+  duracionMs: number | null
   pestana: string
 }
 
-const cifra = (x: { valor: number; etiqueta: string } | null) =>
-  x ? `${n(x.valor)} ${x.etiqueta}` : "—"
+const cifra = (x: Cifra | null) => (x ? `${n(x.valor)} ${x.etiqueta}` : "—")
 
-/** Una fila por fase: estado, entrada → salida y duración. */
+/**
+ * Las cinco fases, unidas por una línea. Cada fila solo muestra su estado;
+ * al pulsarla se abre un popup con la explicación, las cifras y la duración.
+ */
 export function PipelineCompacto({
   fases,
   onInspeccionar,
@@ -33,38 +59,119 @@ export function PipelineCompacto({
   onInspeccionar: (pestana: string) => void
 }) {
   return (
-    <ol className="grid gap-0.5">
-      {fases.map((f, i) => (
-        <li key={f.id}>
-          <button
-            type="button"
-            title={`${f.explicacion} Pulsa para inspeccionar.`}
-            onClick={() => onInspeccionar(f.pestana)}
-            className={cn(
-              "grid w-full grid-cols-[auto_1fr_auto] items-center gap-x-2 gap-y-0.5 rounded-lg px-2 py-1.5 text-left text-xs transition-colors outline-none hover:bg-black/5 focus-visible:ring-3 focus-visible:ring-ring/50 dark:hover:bg-white/5",
-              f.estado === "error" && "bg-red-500/5"
-            )}
-          >
-            <IconoEstado estado={f.estado} />
-            <span className="truncate font-medium">
-              <span className="text-muted-foreground tabular-nums">
-                {i + 1}.
-              </span>{" "}
-              {f.titulo}
-            </span>
-            <span className="text-muted-foreground tabular-nums">
-              {ms(f.duracionMs)}
-            </span>
-            <span className="col-span-2 col-start-2 truncate text-muted-foreground tabular-nums">
-              {cifra(f.entrada)} → {cifra(f.salida)}
-            </span>
-            {f.detalle && (
-              <span className="col-span-2 col-start-2">{f.detalle}</span>
-            )}
-          </button>
-        </li>
+    <ol className="flex flex-1 flex-col">
+      {fases.map((f) => (
+        <FilaFase key={f.id} fase={f} onInspeccionar={onInspeccionar} />
       ))}
     </ol>
+  )
+}
+
+function FilaFase({
+  fase: f,
+  onInspeccionar,
+}: {
+  fase: InfoFase
+  onInspeccionar: (pestana: string) => void
+}) {
+  const [abierto, setAbierto] = React.useState(false)
+  // En la fila solo se ve lo que no puede pasar desapercibido.
+  const aviso =
+    f.nota && (f.nota.error || f.estado === "en_curso") ? f.nota : undefined
+  return (
+    <li
+      // Tramo de línea hasta la fase siguiente: el flujo se lee de arriba abajo.
+      className="relative flex min-h-12 flex-1 not-last:after:absolute not-last:after:top-[calc(50%+14px)] not-last:after:bottom-[calc(-50%+14px)] not-last:after:left-[21.5px] not-last:after:w-px not-last:after:bg-black/10 dark:not-last:after:bg-white/15"
+    >
+      <Popover.Root open={abierto} onOpenChange={setAbierto}>
+        <Popover.Trigger
+          title="Ver detalles"
+          className={cn(
+            "flex w-full items-center gap-3 rounded-xl px-3 text-left transition-colors outline-none hover:bg-black/[0.04] focus-visible:ring-3 focus-visible:ring-ring/50 data-popup-open:bg-black/[0.06] dark:hover:bg-white/[0.05] dark:data-popup-open:bg-white/[0.08]",
+            f.estado === "error" && "bg-red-500/[0.07]"
+          )}
+        >
+          <IconoEstado estado={f.estado} className="size-5" />
+          <span className="flex-1 text-[13px] font-medium">{f.titulo}</span>
+          {aviso && (
+            <span
+              className={cn(
+                "flex items-center gap-1 text-xs",
+                aviso.error
+                  ? "text-red-600 dark:text-red-400"
+                  : "text-muted-foreground"
+              )}
+            >
+              {aviso.texto}
+              {aviso.error && <CaretRightIcon aria-hidden className="size-3" />}
+            </span>
+          )}
+        </Popover.Trigger>
+        <Popover.Portal>
+          <Popover.Positioner
+            side="left"
+            align="center"
+            sideOffset={16}
+            collisionPadding={16}
+            className="z-50"
+          >
+            <Popover.Popup
+              className={cn(
+                "grid w-80 origin-(--transform-origin) gap-3 rounded-2xl p-4 text-xs transition duration-150 outline-none data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0",
+                VIDRIO_OPACO
+              )}
+            >
+              <div className="flex items-center gap-2">
+                <IconoEstado estado={f.estado} className="size-5" />
+                <Popover.Title className="texto-encabezado">
+                  {f.titulo}
+                </Popover.Title>
+              </div>
+              <Popover.Description className="text-muted-foreground">
+                {f.explicacion}
+              </Popover.Description>
+              {f.nota && (
+                <p
+                  className={cn(
+                    "font-medium",
+                    f.nota.error && "text-red-600 dark:text-red-400"
+                  )}
+                >
+                  {f.nota.texto}
+                </p>
+              )}
+              {f.detalle}
+              <dl className="grid grid-cols-3 gap-2 rounded-xl bg-black/[0.04] p-3 tabular-nums dark:bg-white/[0.06]">
+                <div>
+                  <dt className="text-[11px] text-muted-foreground">Entrada</dt>
+                  <dd>{cifra(f.entrada)}</dd>
+                </div>
+                <div>
+                  <dt className="text-[11px] text-muted-foreground">Salida</dt>
+                  <dd>{cifra(f.salida)}</dd>
+                </div>
+                <div>
+                  <dt className="text-[11px] text-muted-foreground">
+                    Duración
+                  </dt>
+                  <dd>{f.duracionMs === null ? "—" : ms(f.duracionMs)}</dd>
+                </div>
+              </dl>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setAbierto(false)
+                  onInspeccionar(f.pestana)
+                }}
+              >
+                Ver datos
+              </Button>
+            </Popover.Popup>
+          </Popover.Positioner>
+        </Popover.Portal>
+      </Popover.Root>
+    </li>
   )
 }
 
@@ -80,29 +187,34 @@ export function CiudadesConError({
 }) {
   if (fallidas.length === 0) return null
   return (
-    <ul className="grid gap-1.5 rounded-lg bg-red-500/5 p-2 text-xs">
+    <Seccion titulo="Descargas fallidas">
       {fallidas.map((e) => (
-        <li key={e.ciudadId} className="grid gap-1">
+        <div key={e.ciudadId} className="grid gap-1 px-3 py-2 text-xs">
           <div className="flex items-center justify-between gap-2">
-            <span className="font-medium">
+            <span className="flex items-center gap-2 font-medium">
+              <WarningCircleIcon
+                weight="fill"
+                aria-hidden
+                className="size-4 text-red-600 dark:text-red-400"
+              />
               {ciudadPorId(e.ciudadId).nombre}
             </span>
             <Button
-              size="xs"
+              size="sm"
               variant="outline"
               disabled={bloqueado}
               onClick={() => onReintentar(e)}
             >
-              <RotateCcwIcon data-icon="inline-start" />
+              <ArrowCounterClockwiseIcon data-icon="inline-start" />
               Reintentar
             </Button>
           </div>
-          <span className="break-words text-red-700 dark:text-red-300">
+          <span className="pl-6 break-words text-muted-foreground">
             {e.error}
           </span>
-        </li>
+        </div>
       ))}
-    </ul>
+    </Seccion>
   )
 }
 
@@ -113,50 +225,66 @@ export interface EntradaRegistro {
   texto: string
 }
 
-const PUNTO: Record<EntradaRegistro["nivel"], string> = {
-  info: "bg-sky-500",
-  ok: "bg-emerald-500",
-  error: "bg-red-500",
+const ICONO_NIVEL: Record<
+  EntradaRegistro["nivel"],
+  { icono: React.ElementType; clase: string; texto: string }
+> = {
+  info: {
+    icono: InfoIcon,
+    clase: "text-sky-500",
+    texto: "Información",
+  },
+  ok: {
+    icono: CheckCircleIcon,
+    clase: "text-emerald-500",
+    texto: "Correcto",
+  },
+  error: {
+    icono: WarningCircleIcon,
+    clase: "text-red-500",
+    texto: "Error",
+  },
 }
 
 /** Registro de actividad, lo más reciente arriba. */
 export function Registro({ entradas }: { entradas: EntradaRegistro[] }) {
   if (entradas.length === 0) {
     return (
-      <p className="text-xs text-muted-foreground">
-        Aún no hay actividad. Elige ciudades y pulsa «Extraer datos».
+      <p className="px-1 py-1 text-xs text-muted-foreground">
+        Aún no hay actividad.
       </p>
     )
   }
   return (
-    <ol
-      aria-live="polite"
-      aria-relevant="additions"
-      className="grid gap-1 font-mono text-[11px] leading-snug"
-    >
-      {entradas.toReversed().map((e) => (
-        <li
-          key={e.id}
-          className="grid grid-cols-[auto_auto_1fr] items-baseline gap-1.5"
-        >
-          <span className="text-muted-foreground tabular-nums">{e.hora}</span>
-          <span
-            aria-hidden
-            className={cn(
-              "size-1.5 translate-y-[-1px] rounded-full",
-              PUNTO[e.nivel]
-            )}
-          />
-          <span
-            className={cn(
-              "break-words",
-              e.nivel === "error" && "text-red-700 dark:text-red-300"
-            )}
+    <ol aria-live="polite" aria-relevant="additions" className={GRUPO}>
+      {entradas.toReversed().map((e) => {
+        const nivel = ICONO_NIVEL[e.nivel]
+        const Icono = nivel.icono
+        return (
+          <li
+            key={e.id}
+            className="grid grid-cols-[auto_1fr_auto] items-start gap-2 px-3 py-2 text-xs"
           >
-            {e.texto}
-          </span>
-        </li>
-      ))}
+            <Icono
+              weight="fill"
+              aria-hidden
+              className={cn("mt-px size-3.5", nivel.clase)}
+            />
+            <span
+              className={cn(
+                "leading-4 break-words",
+                e.nivel === "error" && "text-red-700 dark:text-red-300"
+              )}
+            >
+              <span className="sr-only">{nivel.texto}: </span>
+              {e.texto}
+            </span>
+            <time className="text-[11px] leading-4 text-muted-foreground tabular-nums">
+              {e.hora}
+            </time>
+          </li>
+        )
+      })}
     </ol>
   )
 }

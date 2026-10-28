@@ -1,7 +1,17 @@
 "use client"
 
-import { Dialog } from "@base-ui/react/dialog"
-import { AlertTriangleIcon, UploadCloudIcon, XIcon } from "lucide-react"
+import {
+  BracketsCurlyIcon,
+  CaretRightIcon,
+  ClockCounterClockwiseIcon,
+  CloudArrowUpIcon,
+  DatabaseIcon,
+  EyeIcon,
+  FunnelIcon,
+  ProhibitIcon,
+  SealCheckIcon,
+  TableIcon,
+} from "@phosphor-icons/react"
 import * as React from "react"
 
 import { BotonTema } from "@/components/boton-tema"
@@ -10,6 +20,7 @@ import {
   IconoEstado,
   ms,
   n,
+  plural,
   type EstadoFase,
 } from "@/components/etl/comun"
 import {
@@ -30,15 +41,18 @@ import {
   PestanaTransformados,
 } from "@/components/etl/pestanas-datos"
 import {
+  PastillaIcono,
+  VentanaInspeccion,
+  type Vista,
+} from "@/components/etl/ventana-inspeccion"
+import {
   CiudadesConError,
   PipelineCompacto,
   Registro,
   type EntradaRegistro,
   type InfoFase,
 } from "@/components/etl/pipeline"
-import { Badge } from "@/components/ui/badge"
-import { Button, buttonVariants } from "@/components/ui/button"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Button } from "@/components/ui/button"
 import {
   aRegistroCarga,
   crearLotes,
@@ -57,6 +71,7 @@ import {
   type ExtraccionCiudad,
 } from "@/lib/etl/extraccion"
 import { hoyUtc, validarPeriodo } from "@/lib/etl/fechas"
+import { fetchSimulado } from "@/lib/etl/simulacion"
 import {
   filtrar,
   FILTROS_INICIALES,
@@ -92,6 +107,9 @@ interface ResultadoLocal {
   msLimpieza: number
   entradaTransformacion: number
 }
+
+/** «2026-09-01» → «01/09/2026». */
+const fechaCorta = (iso: string) => iso.split("-").reverse().join("/")
 
 // --- Llamadas a los endpoints del servidor (la escritura nunca sale del servidor) ---
 
@@ -169,12 +187,22 @@ function usePantallaAncha() {
   )
 }
 
+/** «?simulado» en la URL: Open-Meteo se sustituye por datos generados. */
+function useModoSimulado() {
+  return React.useSyncExternalStore(
+    () => () => {},
+    () => new URLSearchParams(window.location.search).has("simulado"),
+    () => false
+  )
+}
+
 // Ancho de las cajas (lg:w-[340px] y lg:w-[400px]) + separación de 16 px + aire.
 const MARGENES_ANCHA: Margenes = { top: 64, bottom: 96, left: 380, right: 440 }
 const MARGENES_ESTRECHA: Margenes = { top: 56, bottom: 88, left: 16, right: 16 }
 
 export function EtlWorkbench() {
   const [hoy] = React.useState(() => hoyUtc())
+  const simulado = useModoSimulado()
   const [ciudadesSel, setCiudadesSel] = React.useState<CiudadId[]>(
     CIUDADES.map((c) => c.id)
   )
@@ -243,7 +271,7 @@ export function EtlWorkbench() {
       if (!activo) return
       setSupabase(e)
       if (e.configurado && e.tablaAccesible)
-        anotar("ok", `Supabase conectado · ${n(e.filas ?? 0)} filas en destino`)
+        anotar("ok", `Supabase conectado, ${n(e.filas ?? 0)} filas en destino`)
       else
         anotar(
           "error",
@@ -277,7 +305,10 @@ export function EtlWorkbench() {
       intentos: previa.intentos + 1,
     })
     const t0 = performance.now()
-    const r = await descargarCiudad(previa.url)
+    const r = await descargarCiudad(
+      previa.url,
+      simulado ? fetchSimulado : undefined
+    )
     const duracionMs = performance.now() - t0
     // Al reintentar se REEMPLAZA la respuesta de la ciudad: nunca se acumula.
     actualizarExtraccion(id, {
@@ -290,7 +321,7 @@ export function EtlWorkbench() {
         new Date().toLocaleString("es-ES", { timeZone: "UTC" }) + " UTC",
     })
     const nombre = ciudadPorId(id).nombre
-    if (r.ok) anotar("ok", `${nombre}: JSON recibido (${ms(duracionMs)})`)
+    if (r.ok) anotar("ok", `${nombre}: JSON recibido en ${ms(duracionMs)}`)
     else anotar("error", `${nombre}: ${r.error}`)
   }
 
@@ -318,12 +349,14 @@ export function EtlWorkbench() {
     const problemas = transformacion.errores.length
     anotar(
       problemas > 0 ? "error" : "ok",
-      `Transformación: ${n(transformacion.registros.length)} registros (${ms(t1 - t0)})` +
-        (problemas > 0 ? ` · ${problemas} problema(s) de estructura` : "")
+      `Transformación: ${n(transformacion.registros.length)} registros en ${ms(t1 - t0)}` +
+        (problemas > 0
+          ? `, ${plural(problemas, "problema", "problemas")} de estructura`
+          : "")
     )
     anotar(
       "ok",
-      `Limpieza: ${n(limpieza.validos.length)} válidos · ${n(limpieza.rechazados.length)} rechazados`
+      `Limpieza: ${n(limpieza.validos.length)} válidos y ${n(limpieza.rechazados.length)} rechazados`
     )
     setLocal({
       transformacion,
@@ -361,9 +394,14 @@ export function EtlWorkbench() {
     setFiltros(FILTROS_INICIALES)
     setExtrayendo(true)
     setPestana("json")
+    if (simulado)
+      anotar(
+        "info",
+        "Modo simulado: datos generados, sin llamar a Open-Meteo. La subida está desactivada."
+      )
     anotar(
       "info",
-      `Extracción de ${ciudades.length} ciudad(es) · ${inicio} → ${fin}`
+      `Extracción de ${plural(ciudades.length, "ciudad", "ciudades")}, del ${fechaCorta(inicio)} al ${fechaCorta(fin)}`
     )
     // Peticiones en serie: se ve qué ciudad se procesa y cuáles quedan.
     for (const id of ciudades) await descargar(id)
@@ -421,7 +459,7 @@ export function EtlWorkbench() {
     const t0 = performance.now()
     anotar(
       "info",
-      `Carga: ${n(snapshot.length)} registros en ${lotes.length} lote(s)`
+      `Carga: ${n(snapshot.length)} registros en ${plural(lotes.length, "lote", "lotes")}`
     )
     setCarga({
       snapshot,
@@ -438,7 +476,7 @@ export function EtlWorkbench() {
     if (resumen.fallidos > 0)
       anotar(
         "error",
-        `Carga: ${resumen.fallidos} lote(s) fallidos · ${n(resumen.registrosCorrectos)} registros confirmados`
+        `Carga: ${plural(resumen.fallidos, "lote fallido", "lotes fallidos")}, ${n(resumen.registrosCorrectos)} registros confirmados`
       )
     else
       anotar(
@@ -459,7 +497,7 @@ export function EtlWorkbench() {
     else if (verificacion)
       anotar(
         verificacion.faltan.length > 0 ? "error" : "ok",
-        `Verificación: ${n(verificacion.encontradas)}/${n(verificacion.comprobadas)} claves en destino`
+        `Verificación: ${n(verificacion.encontradas)} de ${n(verificacion.comprobadas)} claves en destino`
       )
     setCarga((c) =>
       c
@@ -474,6 +512,8 @@ export function EtlWorkbench() {
   }
 
   const conBloqueo = async (fn: () => Promise<void>) => {
+    // Los datos simulados nunca llegan a la base de datos.
+    if (simulado) return
     // Impide envíos simultáneos aunque se pulse dos veces muy rápido.
     if (cargaEnCursoRef.current) return
     cargaEnCursoRef.current = true
@@ -516,6 +556,14 @@ export function EtlWorkbench() {
 
   const supabaseDisponible =
     supabase?.configurado === true && supabase.tablaAccesible
+  /** Motivo por el que no se puede subir aunque Supabase esté disponible. */
+  const bloqueoSubida = simulado
+    ? "Modo simulado: estos datos no se pueden subir"
+    : undefined
+  const puedeSubir = supabaseDisponible && !bloqueoSubida
+  // Sin selección, la caja de subida ofrece subir todos los válidos.
+  const eligiendo = paraCargar.length > 0
+  const aSubir = eligiendo ? paraCargar.length : validos.length
 
   const reintentarLotes = () =>
     conBloqueo(async () => {
@@ -543,27 +591,46 @@ export function EtlWorkbench() {
         ? "error"
         : "completada"
 
+  const enviados = resumenCarga
+    ? resumenCarga.completados + resumenCarga.fallidos
+    : 0
+
+  const ocupado = extrayendo || cargando
+
   const fases: InfoFase[] = [
     {
       id: "extraccion",
       titulo: "Extracción",
       explicacion:
         "Descarga el JSON horario del archivo de Open-Meteo: una petición HTTP por ciudad, en UTC, °C y mm.",
+      // Durante las peticiones: cuántas ciudades van y cuántas quedan.
+      nota: extrayendo
+        ? {
+            texto: `${n(descargadas.length + conError.length)} de ${n(lista.length)} procesadas`,
+          }
+        : conError.length > 0
+          ? {
+              texto: `${n(conError.length)} con error`,
+              error: true,
+            }
+          : undefined,
       estado: estadoExtraccion,
       entrada: ejecucion
         ? { valor: ejecucion.ciudades.length, etiqueta: "ciudades" }
         : null,
       salida: ejecucion
-        ? { valor: descargadas.length, etiqueta: "JSON recibidos" }
+        ? { valor: descargadas.length, etiqueta: "JSON" }
         : null,
       duracionMs: lista.some((e) => e.duracionMs !== undefined)
         ? lista.reduce((s, e) => s + (e.duracionMs ?? 0), 0)
         : null,
       detalle:
         conError.length > 0 ? (
-          <span className="text-red-700 dark:text-red-300">
-            {conError.length} ciudad(es) con error: reinténtalas abajo.
-          </span>
+          <CiudadesConError
+            fallidas={conError}
+            onReintentar={(e) => reintentarCiudad(e.ciudadId)}
+            bloqueado={ocupado}
+          />
         ) : undefined,
       pestana: "json",
     },
@@ -572,20 +639,21 @@ export function EtlWorkbench() {
       titulo: "Transformación",
       explicacion:
         "Convierte los arrays paralelos (time, temperature_2m…) en un registro por ciudad y hora, con la fecha interpretada en UTC.",
+      nota:
+        local && local.transformacion.errores.length > 0
+          ? {
+              texto: "Estructura incorrecta",
+              error: true,
+            }
+          : undefined,
       estado: !local
         ? "pendiente"
         : local.transformacion.errores.length > 0
           ? "error"
           : "completada",
-      entrada: local ? { valor: horasBrutas, etiqueta: "horas en JSON" } : null,
+      entrada: local ? { valor: horasBrutas, etiqueta: "horas" } : null,
       salida: local ? { valor: totalExtraido, etiqueta: "registros" } : null,
       duracionMs: local?.msTransformacion ?? null,
-      detalle:
-        local && local.transformacion.errores.length > 0 ? (
-          <span className="text-red-700 dark:text-red-300">
-            {local.transformacion.errores.length} problema(s) de estructura.
-          </span>
-        ) : undefined,
       pestana: "transformados",
     },
     {
@@ -593,15 +661,11 @@ export function EtlWorkbench() {
       titulo: "Limpieza",
       explicacion:
         "Valida fechas, tipos numéricos y rangos; rechaza nulos (sin convertirlos en 0) y duplicados, anotando el motivo.",
+      nota: local ? { texto: `${n(rechazados)} rechazados` } : undefined,
       estado: local ? "completada" : "pendiente",
       entrada: local ? { valor: totalExtraido, etiqueta: "registros" } : null,
       salida: local ? { valor: validos.length, etiqueta: "válidos" } : null,
       duracionMs: local?.msLimpieza ?? null,
-      detalle: local ? (
-        <span className="text-muted-foreground">
-          {n(rechazados)} rechazados por calidad
-        </span>
-      ) : undefined,
       pestana: rechazados > 0 ? "rechazados" : "validos",
     },
     {
@@ -609,6 +673,11 @@ export function EtlWorkbench() {
       titulo: "Filtrado y selección",
       explicacion:
         "Aplica tus filtros y el orden elegido sobre los válidos; tú decides qué filas se cargan.",
+      nota: !local
+        ? undefined
+        : interpretados.errores.length > 0
+          ? { texto: "Revisa los filtros", error: true }
+          : { texto: `${n(ordenados.length)} coinciden` },
       estado: !local
         ? "pendiente"
         : interpretados.errores.length > 0
@@ -619,11 +688,6 @@ export function EtlWorkbench() {
         ? { valor: paraCargar.length, etiqueta: "seleccionados" }
         : null,
       duracionMs: local ? msFiltrado : null,
-      detalle: local ? (
-        <span className="text-muted-foreground">
-          {n(ordenados.length)} coinciden con los filtros
-        </span>
-      ) : undefined,
       pestana: "validos",
     },
     {
@@ -631,6 +695,33 @@ export function EtlWorkbench() {
       titulo: "Carga",
       explicacion:
         "Upsert en Supabase por lotes de 500 desde el servidor y verificación posterior de las claves en destino.",
+      nota: carga
+        ? carga.fase === "enviando"
+          ? {
+              texto: `${n(enviados)} de ${plural(resumenCarga!.lotes, "lote", "lotes")} enviados`,
+            }
+          : carga.fase === "verificando"
+            ? { texto: "Verificando…" }
+            : carga.verificacion
+              ? {
+                  texto: `${n(carga.verificacion.encontradas)} verificados`,
+                  error:
+                    !!carga.verificacion.error ||
+                    carga.verificacion.faltan.length > 0,
+                }
+              : resumenCarga!.fallidos > 0
+                ? {
+                    texto: plural(
+                      resumenCarga!.fallidos,
+                      "lote fallido",
+                      "lotes fallidos"
+                    ),
+                    error: true,
+                  }
+                : undefined
+        : supabase && !supabase.configurado
+          ? { texto: "Sin configurar" }
+          : undefined,
       estado: !carga
         ? "pendiente"
         : carga.fase !== "terminada"
@@ -647,15 +738,6 @@ export function EtlWorkbench() {
         ? { valor: resumenCarga!.registrosCorrectos, etiqueta: "confirmados" }
         : null,
       duracionMs: carga?.duracionMs ?? null,
-      detalle: carga ? (
-        <span className="text-muted-foreground">
-          Lotes {resumenCarga!.completados}/{resumenCarga!.lotes}
-          {carga.verificacion &&
-            ` · verificados ${n(carga.verificacion.encontradas)}/${n(carga.verificacion.comprobadas)}`}
-        </span>
-      ) : supabase && !supabase.configurado ? (
-        <span className="text-muted-foreground">Supabase sin configurar</span>
-      ) : undefined,
       pestana: "carga",
     },
   ]
@@ -667,7 +749,6 @@ export function EtlWorkbench() {
       : undefined
 
   const pantallaAncha = usePantallaAncha()
-  const ocupado = extrayendo || cargando
 
   // Las ciudades muestran en el mapa el estado de su última descarga.
   const estadosCiudades = Object.fromEntries(
@@ -688,45 +769,66 @@ export function EtlWorkbench() {
     error: "Con errores",
   }
 
-  const vistas = [
+  // Cada vista lleva su icono sobre una pastilla de color, como los Ajustes de iOS.
+  const vistas: Vista[] = [
     {
       pestana: "json",
+      icono: BracketsCurlyIcon,
+      tono: "from-sky-400 to-blue-500",
       etiqueta: "JSON original",
       valor: ejecucion ? descargadas.length : null,
     },
     {
       pestana: "transformados",
+      icono: TableIcon,
+      tono: "from-indigo-400 to-indigo-600",
       etiqueta: "Transformados",
       valor: local ? totalExtraido : null,
     },
     {
       pestana: "validos",
+      icono: SealCheckIcon,
+      tono: "from-emerald-400 to-green-600",
       etiqueta: "Válidos",
       valor: local ? validos.length : null,
     },
     {
       pestana: "rechazados",
+      icono: ProhibitIcon,
+      tono: "from-rose-400 to-red-500",
       etiqueta: "Rechazados",
       valor: local ? rechazados : null,
     },
     {
       pestana: "carga",
+      icono: EyeIcon,
+      tono: "from-amber-400 to-orange-500",
       etiqueta: "Vista previa",
       valor: local ? paraCargar.length : null,
     },
     {
       pestana: "supabase",
+      icono: DatabaseIcon,
+      tono: "from-teal-400 to-teal-600",
       etiqueta: "En Supabase",
       valor: supabase?.filas ?? null,
+    },
+    {
+      pestana: "actividad",
+      icono: ClockCounterClockwiseIcon,
+      tono: "from-zinc-400 to-zinc-600",
+      etiqueta: "Actividad",
+      valor: registro.length,
+      aviso: registro.filter((e) => e.nivel === "error").length,
     },
   ]
 
   const textoSupabase = !supabase
-    ? "Comprobando Supabase…"
+    ? "Comprobando…"
     : supabaseDisponible
-      ? "Supabase conectado"
+      ? "Conectado"
       : !supabase.configurado
-        ? "Supabase no disponible"
+        ? "No disponible"
         : "Tabla no accesible"
 
   return (
@@ -741,18 +843,24 @@ export function EtlWorkbench() {
       />
 
       <div className="grid gap-4 p-4 lg:contents">
-        {/* Izquierda: qué se extrae */}
-        <aside className="lg:absolute lg:top-4 lg:left-4 lg:flex lg:max-h-[calc(100svh-2rem)] lg:w-[340px] lg:flex-col">
+        {/* Izquierda: qué se extrae y qué se sube */}
+        <aside className="grid content-start gap-4 lg:absolute lg:top-4 lg:bottom-4 lg:left-4 lg:flex lg:w-[340px] lg:flex-col lg:gap-3">
           <Caja
-            titulo={
-              <span className="grid">
-                <span className="text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
-                  Práctica de Big Data · Pipeline ETL
-                </span>
-                <span className="text-base">Open-Meteo → Supabase</span>
+            titulo="Configuración"
+            accion={
+              <span className="flex items-center gap-2">
+                {simulado && (
+                  <span
+                    className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300"
+                    title="Open-Meteo se sustituye por datos generados. Quita «?simulado» de la URL para usar la API real."
+                  >
+                    Datos simulados
+                  </span>
+                )}
+                <BotonTema />
               </span>
             }
-            accion={<BotonTema />}
+            className="lg:shrink-0"
           >
             <ConfiguracionExtraccion
               ciudades={ciudadesSel}
@@ -768,59 +876,15 @@ export function EtlWorkbench() {
               onExtraer={extraer}
             />
           </Caja>
-        </aside>
 
-        {/* Derecha: pipeline y registro; debajo, inspección y subida */}
-        <div className="grid gap-4 lg:absolute lg:top-4 lg:right-4 lg:bottom-4 lg:w-[400px] lg:grid-rows-[minmax(0,1fr)_auto] lg:gap-3">
           <Caja
-            titulo="Pipeline"
+            titulo="Subida a Supabase"
+            className="lg:flex-1"
             accion={
-              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <IconoEstado estado={estadoGlobal} className="size-3.5" />
-                <span aria-hidden>{textoGlobal[estadoGlobal]}</span>
-              </span>
-            }
-            cuerpoClassName="grid content-start gap-3 p-2"
-          >
-            <PipelineCompacto fases={fases} onInspeccionar={inspeccionar} />
-            <CiudadesConError
-              fallidas={conError}
-              onReintentar={(e) => reintentarCiudad(e.ciudadId)}
-              bloqueado={ocupado}
-            />
-            <div className="grid gap-1.5 border-t border-black/5 px-2 pt-3 dark:border-white/5">
-              <h3 className="text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
-                Registro
-              </h3>
-              <Registro entradas={registro} />
-            </div>
-          </Caja>
-
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Caja titulo="Inspección de datos" cuerpoClassName="p-1.5">
-              <ul className="grid">
-                {vistas.map((v) => (
-                  <li key={v.pestana}>
-                    <button
-                      type="button"
-                      onClick={() => inspeccionar(v.pestana)}
-                      className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1 text-xs transition-colors outline-none hover:bg-black/5 focus-visible:ring-3 focus-visible:ring-ring/50 dark:hover:bg-white/5"
-                    >
-                      <span>{v.etiqueta}</span>
-                      <span className="text-muted-foreground tabular-nums">
-                        {v.valor === null ? "—" : n(v.valor)}
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </Caja>
-
-            <Caja
-              titulo="Subida de registros"
-              cuerpoClassName="grid content-start gap-2 p-3 text-xs"
-            >
-              <p className="flex items-center gap-1.5" title={supabase?.error}>
+              <span
+                className="flex items-center gap-1.5 text-xs text-muted-foreground"
+                title={supabase?.error}
+              >
                 <IconoEstado
                   estado={
                     !supabase
@@ -832,185 +896,178 @@ export function EtlWorkbench() {
                   className="size-3.5"
                 />
                 <span aria-hidden>{textoSupabase}</span>
-              </p>
-              <dl className="grid grid-cols-[1fr_auto] gap-x-2 tabular-nums">
-                <dt className="text-muted-foreground">Válidos</dt>
-                <dd>{local ? n(validos.length) : "—"}</dd>
-                <dt className="text-muted-foreground">Seleccionados</dt>
-                <dd>{local ? n(paraCargar.length) : "—"}</dd>
-              </dl>
+              </span>
+            }
+            cuerpoClassName="flex flex-col gap-3 p-3"
+          >
+            {/* Qué se va a subir: lo elegido o, si no se eligió nada, todo lo válido. */}
+            <div
+              aria-live="polite"
+              className="flex flex-1 flex-col items-center justify-center gap-1 py-6 text-center"
+            >
+              <span className="text-5xl leading-none font-semibold tracking-tight tabular-nums">
+                {local ? n(aSubir) : "—"}
+              </span>
+              <span className="mt-2 text-[13px] font-medium">
+                {!local
+                  ? "Extrae datos para empezar"
+                  : aSubir === 1
+                    ? "registro listo para subir"
+                    : "registros listos para subir"}
+              </span>
+              {local && (
+                <span className="text-xs text-muted-foreground">
+                  {bloqueoSubida ??
+                    (eligiendo ? "Los que has elegido" : "Todos los válidos")}
+                </span>
+              )}
               {fueraDeFiltros > 0 && (
-                <p className="flex items-start gap-1 text-amber-800 dark:text-amber-300">
-                  <AlertTriangleIcon
-                    className="mt-px size-3.5 shrink-0"
-                    aria-hidden
-                  />
-                  {n(fueraDeFiltros)} fuera de filtros (no se suben)
-                </p>
+                <span className="text-xs text-amber-700 dark:text-amber-300">
+                  {n(fueraDeFiltros)} elegidos no cumplen los filtros
+                </span>
               )}
-              <Button
-                size="sm"
-                disabled={
-                  !supabaseDisponible || ocupado || validos.length === 0
-                }
-                onClick={subirTodos}
-                title="Restablece los filtros y sube todos los registros válidos en lotes de 500 (upsert, sin duplicados)."
-              >
-                <UploadCloudIcon data-icon="inline-start" />
-                Subir todos
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={
-                  !supabaseDisponible || ocupado || paraCargar.length === 0
-                }
-                onClick={subir}
-              >
-                Subir selección
-              </Button>
-              {carga && resumenCarga && (
-                <p className="flex items-center gap-1.5 tabular-nums">
-                  <IconoEstado estado={fases[4].estado} className="size-3.5" />
-                  Lotes {resumenCarga.completados}/{resumenCarga.lotes}
-                  {carga.verificacion &&
-                    ` · ${n(carga.verificacion.encontradas)} verif.`}
-                </p>
-              )}
-              <Button
-                variant="link"
-                size="xs"
-                className="h-auto justify-self-start px-0"
-                onClick={() => inspeccionar("carga")}
-              >
-                Ver detalles
-              </Button>
-            </Caja>
-          </div>
+            </div>
+            <Button
+              size="xl"
+              disabled={!puedeSubir || ocupado || aSubir === 0}
+              onClick={eligiendo ? subir : subirTodos}
+            >
+              <CloudArrowUpIcon data-icon="inline-start" />
+              Subir a Supabase
+            </Button>
+            <Button
+              size="lg"
+              variant="outline"
+              disabled={!local}
+              onClick={() => inspeccionar("validos")}
+            >
+              <FunnelIcon data-icon="inline-start" />
+              {eligiendo ? "Cambiar la selección" : "Elegir cuáles subir"}
+            </Button>
+          </Caja>
+        </aside>
+
+        {/* Derecha: pipeline e inspección (con la actividad) */}
+        <div className="grid content-start gap-4 lg:absolute lg:top-4 lg:right-4 lg:bottom-4 lg:flex lg:w-[400px] lg:flex-col lg:gap-3">
+          <Caja
+            titulo="Pipeline"
+            className="lg:flex-1"
+            accion={
+              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <IconoEstado estado={estadoGlobal} className="size-3.5" />
+                <span aria-hidden>{textoGlobal[estadoGlobal]}</span>
+              </span>
+            }
+            cuerpoClassName="flex flex-col p-2"
+          >
+            <PipelineCompacto fases={fases} onInspeccionar={inspeccionar} />
+          </Caja>
+
+          <Caja
+            titulo="Inspección de datos"
+            className="lg:shrink-0"
+            cuerpoClassName="p-2"
+          >
+            <ul className="grid">
+              {vistas.map((v) => (
+                <li key={v.pestana}>
+                  <button
+                    type="button"
+                    aria-haspopup="dialog"
+                    title={
+                      v.aviso
+                        ? `Abrir «${v.etiqueta}» (${plural(v.aviso, "error", "errores")})`
+                        : `Abrir «${v.etiqueta}»`
+                    }
+                    onClick={() => inspeccionar(v.pestana)}
+                    className="group flex min-h-11 w-full items-center gap-3 rounded-xl px-3 text-left transition-colors outline-none hover:bg-black/[0.04] focus-visible:ring-3 focus-visible:ring-ring/50 dark:hover:bg-white/[0.05]"
+                  >
+                    <PastillaIcono vista={v} tamano="md" />
+                    <span className="flex-1 text-[13px] font-medium">
+                      {v.etiqueta}
+                    </span>
+                    {v.aviso ? (
+                      // Insignia roja, como las notificaciones de iOS.
+                      <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-[11px] font-semibold text-white tabular-nums">
+                        {n(v.aviso)}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground tabular-nums">
+                        {v.valor === null ? "—" : n(v.valor)}
+                      </span>
+                    )}
+                    <CaretRightIcon
+                      aria-hidden
+                      className="size-3 shrink-0 text-muted-foreground/60 transition-transform group-hover:translate-x-0.5"
+                    />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </Caja>
         </div>
       </div>
 
-      <Dialog.Root open={inspeccionAbierta} onOpenChange={setInspeccionAbierta}>
-        <Dialog.Portal>
-          <Dialog.Backdrop className="fixed inset-0 z-40 bg-black/25 backdrop-blur-[2px]" />
-          <Dialog.Popup className="fixed inset-3 z-50 flex flex-col overflow-hidden rounded-2xl border border-white/60 bg-background/90 shadow-2xl backdrop-blur-xl outline-none sm:inset-6 lg:inset-10 dark:border-white/10">
-            <header className="flex items-center justify-between gap-2 border-b px-4 py-3">
-              <Dialog.Title className="text-base font-semibold">
-                Inspección de datos
-              </Dialog.Title>
-              <Dialog.Close
-                aria-label="Cerrar"
-                className={buttonVariants({
-                  variant: "ghost",
-                  size: "icon-sm",
-                })}
-              >
-                <XIcon />
-              </Dialog.Close>
-            </header>
-            <div className="min-h-0 flex-1 overflow-auto p-4">
-              <Tabs
-                value={pestana}
-                onValueChange={(v) => setPestana(String(v))}
-              >
-                <div className="overflow-x-auto pb-1">
-                  <TabsList>
-                    <TabsTrigger value="json">JSON original</TabsTrigger>
-                    <TabsTrigger value="transformados">
-                      Transformados{" "}
-                      {local && (
-                        <Badge variant="secondary">{n(totalExtraido)}</Badge>
-                      )}
-                    </TabsTrigger>
-                    <TabsTrigger value="validos">
-                      Registros válidos{" "}
-                      {local && (
-                        <Badge variant="secondary">{n(validos.length)}</Badge>
-                      )}
-                    </TabsTrigger>
-                    <TabsTrigger value="rechazados">
-                      Rechazados{" "}
-                      {local && (
-                        <Badge variant="secondary">{n(rechazados)}</Badge>
-                      )}
-                    </TabsTrigger>
-                    <TabsTrigger value="carga">
-                      Vista previa de la carga{" "}
-                      {local && (
-                        <Badge variant="secondary">
-                          {n(paraCargar.length)}
-                        </Badge>
-                      )}
-                    </TabsTrigger>
-                    <TabsTrigger value="supabase">
-                      Datos en Supabase
-                    </TabsTrigger>
-                  </TabsList>
-                </div>
-                <div className="rounded-xl border bg-card p-3 sm:p-4">
-                  <TabsContent value="json">
-                    <PestanaJson
-                      orden={ejecucion?.ciudades ?? []}
-                      extracciones={extracciones}
-                      inicio={ejecucion?.inicio ?? inicio}
-                      fin={ejecucion?.fin ?? fin}
-                    />
-                  </TabsContent>
-                  <TabsContent value="transformados">
-                    <PestanaTransformados
-                      transformacion={local?.transformacion ?? null}
-                    />
-                  </TabsContent>
-                  <TabsContent value="validos">
-                    <PestanaValidos
-                      totalValidos={validos.length}
-                      ciudadesDisponibles={ciudadesDisponibles}
-                      ordenados={ordenados}
-                      filtros={filtros}
-                      onFiltros={cambiarFiltros}
-                      interpretados={interpretados}
-                      orden={orden}
-                      onOrden={cambiarOrden}
-                      seleccion={seleccion}
-                      onSeleccion={setSeleccion}
-                      seleccionadosParaCargar={paraCargar.length}
-                      fueraDeFiltros={fueraDeFiltros}
-                    />
-                  </TabsContent>
-                  <TabsContent value="rechazados">
-                    <PestanaRechazados
-                      limpieza={local?.limpieza ?? null}
-                      excluidosPorFiltros={Math.max(
-                        0,
-                        validos.length - ordenados.length
-                      )}
-                    />
-                  </TabsContent>
-                  <TabsContent value="carga">
-                    <PestanaCarga
-                      supabase={supabase}
-                      paraCargar={registrosParaCargar}
-                      carga={carga}
-                      enCurso={cargando}
-                      onSubir={subir}
-                      totalValidos={validos.length}
-                      onSubirTodos={subirTodos}
-                      onReintentar={reintentarLotes}
-                    />
-                  </TabsContent>
-                  <TabsContent value="supabase">
-                    <PestanaSupabase
-                      supabase={supabase}
-                      pendientesLocales={paraCargar.length}
-                      version={versionDestino}
-                    />
-                  </TabsContent>
-                </div>
-              </Tabs>
-            </div>
-          </Dialog.Popup>
-        </Dialog.Portal>
-      </Dialog.Root>
+      <VentanaInspeccion
+        abierta={inspeccionAbierta}
+        onAbierta={setInspeccionAbierta}
+        vistas={vistas}
+        pestana={pestana}
+        onPestana={setPestana}
+        contenido={{
+          json: (
+            <PestanaJson
+              orden={ejecucion?.ciudades ?? []}
+              extracciones={extracciones}
+              inicio={ejecucion?.inicio ?? inicio}
+              fin={ejecucion?.fin ?? fin}
+            />
+          ),
+          transformados: (
+            <PestanaTransformados
+              transformacion={local?.transformacion ?? null}
+            />
+          ),
+          validos: (
+            <PestanaValidos
+              totalValidos={validos.length}
+              ciudadesDisponibles={ciudadesDisponibles}
+              ordenados={ordenados}
+              filtros={filtros}
+              onFiltros={cambiarFiltros}
+              interpretados={interpretados}
+              orden={orden}
+              onOrden={cambiarOrden}
+              seleccion={seleccion}
+              onSeleccion={setSeleccion}
+              seleccionadosParaCargar={paraCargar.length}
+              fueraDeFiltros={fueraDeFiltros}
+            />
+          ),
+          rechazados: <PestanaRechazados limpieza={local?.limpieza ?? null} />,
+          carga: (
+            <PestanaCarga
+              supabase={supabase}
+              paraCargar={registrosParaCargar}
+              carga={carga}
+              enCurso={cargando}
+              onSubir={subir}
+              totalValidos={validos.length}
+              onSubirTodos={subirTodos}
+              onReintentar={reintentarLotes}
+              bloqueo={bloqueoSubida}
+            />
+          ),
+          supabase: (
+            <PestanaSupabase
+              supabase={supabase}
+              pendientesLocales={paraCargar.length}
+              version={versionDestino}
+            />
+          ),
+          actividad: <Registro entradas={registro} />,
+        }}
+      />
     </div>
   )
 }

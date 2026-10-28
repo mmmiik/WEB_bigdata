@@ -1,42 +1,36 @@
 "use client"
 
-import { AlertTriangleIcon, DatabaseIcon, RefreshCwIcon } from "lucide-react"
+import { Popover } from "@base-ui/react/popover"
+import {
+  ArrowClockwiseIcon,
+  FunnelIcon,
+  WarningIcon,
+} from "@phosphor-icons/react"
 import * as React from "react"
 
 import {
-  ConUnidad,
-  dec,
   n,
   Paginacion,
   usePaginacion,
   Vacio,
+  VIDRIO_OPACO,
 } from "@/components/etl/comun"
 import {
   AvisoSupabase,
   type EstadoSupabase,
 } from "@/components/etl/pestana-carga"
-import { celdaFecha } from "@/components/etl/pestanas-datos"
+import {
+  BarraVista,
+  fechaUtc,
+  Recuento,
+  TablaDatos,
+  type OrdenTabla,
+} from "@/components/etl/vista-datos"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
 import { NOMBRES_CIUDADES } from "@/lib/etl/ciudades"
+import { cn } from "@/lib/utils"
 
 interface FilaRemota {
   id: number
@@ -48,17 +42,14 @@ interface FilaRemota {
   importado_en: string
 }
 
-const ORDENES = {
-  fecha_hora: "Fecha y hora",
-  ciudad: "Ciudad",
-  temperatura_c: "Temperatura",
-  humedad_pct: "Humedad",
-  precipitacion_mm: "Precipitación",
-  importado_en: "Importado en",
-} as const
-type CampoRemoto = keyof typeof ORDENES
-
-const TODAS = "__todas__"
+const CAMPOS_REMOTOS = [
+  "ciudad",
+  "fecha_hora",
+  "temperatura_c",
+  "humedad_pct",
+  "precipitacion_mm",
+  "importado_en",
+]
 
 function isoUtc(valor: string) {
   return new Date(valor).toISOString().replace(/\.000Z$/, "Z")
@@ -74,11 +65,14 @@ export function PestanaSupabase({
   /** Cambia tras cada carga para refrescar automáticamente. */
   version: number
 }) {
-  const [ciudad, setCiudad] = React.useState(TODAS)
+  const [ciudad, setCiudad] = React.useState<string | null>(null)
   const [desde, setDesde] = React.useState("")
   const [hasta, setHasta] = React.useState("")
-  const [orden, setOrden] = React.useState<CampoRemoto>("fecha_hora")
-  const [dir, setDir] = React.useState<"asc" | "desc">("asc")
+  // ORDER BY de la consulta: se elige pulsando los encabezados.
+  const [orden, setOrden] = React.useState<OrdenTabla>({
+    campo: "fecha_hora",
+    direccion: "asc",
+  })
   const [total, setTotal] = React.useState(0)
   const [filas, setFilas] = React.useState<FilaRemota[]>([])
   const [estado, setEstado] = React.useState<"inactivo" | "cargando" | "error">(
@@ -95,12 +89,12 @@ export function PestanaSupabase({
     if (!disponible) return
     const control = new AbortController()
     const params = new URLSearchParams({
-      orden,
-      dir,
+      orden: orden.campo,
+      dir: orden.direccion,
       pagina: String(pagina),
       tamano: String(tamano),
     })
-    if (ciudad !== TODAS) params.append("ciudad", ciudad)
+    if (ciudad) params.append("ciudad", ciudad)
     if (desde) params.set("desde", desde)
     if (hasta) params.set("hasta", hasta)
 
@@ -133,7 +127,6 @@ export function PestanaSupabase({
     desde,
     hasta,
     orden,
-    dir,
     pagina,
     tamano,
     recargas,
@@ -147,196 +140,181 @@ export function PestanaSupabase({
       p.setPagina(1)
     }
 
-  return (
-    <div className="grid grid-cols-1 gap-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <AvisoSupabase estado={supabase} />
-        <div className="flex flex-wrap gap-2 text-xs">
-          <Badge
-            variant="outline"
-            className="border-emerald-600/30 text-emerald-800 dark:text-emerald-200"
-          >
-            <DatabaseIcon aria-hidden />
-            Persistido en Supabase: {n(supabase?.filas ?? total)} filas en total
-          </Badge>
-          <Badge variant="outline">
-            Local pendiente de subir: {n(pendientesLocales)} seleccionados
-          </Badge>
-        </div>
-      </div>
-      <p className="text-sm text-muted-foreground">
-        Esta pestaña lee la tabla real a través del servidor. Lo que ves aquí
-        está persistido; los registros de las demás pestañas solo existen en
-        esta sesión del navegador.
-      </p>
+  const ordenarPor = cambiar((campo: string) =>
+    setOrden((o) => ({
+      campo,
+      direccion: o.campo === campo && o.direccion === "asc" ? "desc" : "asc",
+    }))
+  )
+  const filtrosActivos = [ciudad, desde, hasta].filter(Boolean).length
 
-      <div className="flex flex-wrap items-end gap-3 rounded-xl border bg-muted/30 p-3">
-        <div className="grid grid-cols-1 gap-1">
-          <span id="sb-ciudad" className="text-xs text-muted-foreground">
-            Ciudad
-          </span>
-          <Select
-            value={ciudad}
-            onValueChange={(v) => v && cambiar(setCiudad)(v)}
-            items={[
-              { value: TODAS, label: "Todas" },
-              ...NOMBRES_CIUDADES.map((c) => ({ value: c, label: c })),
-            ]}
-          >
-            <SelectTrigger aria-labelledby="sb-ciudad" className="min-w-36">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={TODAS}>Todas</SelectItem>
-              {NOMBRES_CIUDADES.map((c) => (
-                <SelectItem key={c} value={c}>
-                  {c}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="grid grid-cols-1 gap-1">
-          <Label htmlFor="sb-desde" className="text-xs text-muted-foreground">
-            Desde (UTC)
-          </Label>
-          <Input
-            id="sb-desde"
-            type="date"
-            value={desde}
-            onChange={(e) => cambiar(setDesde)(e.target.value)}
-          />
-        </div>
-        <div className="grid grid-cols-1 gap-1">
-          <Label htmlFor="sb-hasta" className="text-xs text-muted-foreground">
-            Hasta (UTC, incluido)
-          </Label>
-          <Input
-            id="sb-hasta"
-            type="date"
-            value={hasta}
-            onChange={(e) => cambiar(setHasta)(e.target.value)}
-          />
-        </div>
-        <div className="grid grid-cols-1 gap-1">
-          <span id="sb-orden" className="text-xs text-muted-foreground">
-            Ordenar por (ORDER BY)
-          </span>
-          <Select
-            value={orden}
-            onValueChange={(v) => v && cambiar(setOrden)(v as CampoRemoto)}
-            items={Object.entries(ORDENES).map(([value, label]) => ({
-              value,
-              label,
-            }))}
-          >
-            <SelectTrigger aria-labelledby="sb-orden" className="min-w-40">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {Object.entries(ORDENES).map(([v, l]) => (
-                <SelectItem key={v} value={v}>
-                  {l}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div role="group" aria-label="Dirección" className="flex gap-1">
-          <Button
-            variant={dir === "asc" ? "default" : "outline"}
-            aria-pressed={dir === "asc"}
-            onClick={() => cambiar(setDir)("asc")}
-          >
-            Asc.
-          </Button>
-          <Button
-            variant={dir === "desc" ? "default" : "outline"}
-            aria-pressed={dir === "desc"}
-            onClick={() => cambiar(setDir)("desc")}
-          >
-            Desc.
-          </Button>
-        </div>
-        <Button
-          variant="outline"
-          disabled={!disponible || estado === "cargando"}
-          onClick={() => setRecargas((r) => r + 1)}
-        >
-          <RefreshCwIcon
-            data-icon="inline-start"
-            className={estado === "cargando" ? "animate-spin" : undefined}
-          />
-          Actualizar
-        </Button>
-        {leidoEn && (
-          <span className="text-xs text-muted-foreground" aria-live="polite">
-            Última lectura: {leidoEn}
+  return (
+    <div className="grid gap-3">
+      <AvisoSupabase estado={supabase} />
+
+      <BarraVista
+        acciones={
+          <>
+            <Popover.Root>
+              <Popover.Trigger
+                render={
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={!disponible}
+                    className={cn(
+                      filtrosActivos > 0 && "bg-primary/10 text-primary"
+                    )}
+                  />
+                }
+              >
+                <FunnelIcon data-icon="inline-start" />
+                Filtros
+                {filtrosActivos > 0 && (
+                  <span className="tabular-nums">({filtrosActivos})</span>
+                )}
+              </Popover.Trigger>
+              <Popover.Portal>
+                <Popover.Positioner
+                  side="bottom"
+                  align="end"
+                  sideOffset={8}
+                  collisionPadding={16}
+                  className="z-50"
+                >
+                  <Popover.Popup
+                    className={cn(
+                      "grid w-[22rem] origin-(--transform-origin) gap-3 rounded-2xl p-4 text-xs transition duration-150 outline-none data-ending-style:scale-95 data-ending-style:opacity-0 data-starting-style:scale-95 data-starting-style:opacity-0",
+                      VIDRIO_OPACO
+                    )}
+                  >
+                    <div className="flex items-center justify-between">
+                      <Popover.Title className="texto-encabezado">
+                        Filtros
+                      </Popover.Title>
+                      <Button
+                        size="xs"
+                        variant="ghost"
+                        disabled={filtrosActivos === 0}
+                        onClick={() => {
+                          setCiudad(null)
+                          setDesde("")
+                          setHasta("")
+                          p.setPagina(1)
+                        }}
+                      >
+                        Restablecer
+                      </Button>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-muted-foreground">Ciudad</span>
+                      <div className="flex flex-wrap justify-end gap-1">
+                        {[null, ...NOMBRES_CIUDADES].map((c) => (
+                          <button
+                            key={c ?? "todas"}
+                            type="button"
+                            aria-pressed={ciudad === c}
+                            onClick={() => cambiar(setCiudad)(c)}
+                            className={cn(
+                              "h-7 rounded-full px-2.5 font-medium transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+                              ciudad === c
+                                ? "bg-primary text-primary-foreground"
+                                : "bg-black/[0.06] text-muted-foreground dark:bg-white/[0.1]"
+                            )}
+                          >
+                            {c ?? "Todas"}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-muted-foreground">Desde (UTC)</span>
+                      <Input
+                        type="date"
+                        aria-label="Desde, en UTC"
+                        value={desde}
+                        onChange={(e) => cambiar(setDesde)(e.target.value)}
+                        className="h-8 w-auto text-xs"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-muted-foreground">Hasta (UTC)</span>
+                      <Input
+                        type="date"
+                        aria-label="Hasta, en UTC, incluido"
+                        value={hasta}
+                        onChange={(e) => cambiar(setHasta)(e.target.value)}
+                        className="h-8 w-auto text-xs"
+                      />
+                    </div>
+                  </Popover.Popup>
+                </Popover.Positioner>
+              </Popover.Portal>
+            </Popover.Root>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={!disponible || estado === "cargando"}
+              onClick={() => setRecargas((r) => r + 1)}
+              title={leidoEn ? `Última lectura: ${leidoEn}` : undefined}
+            >
+              <ArrowClockwiseIcon
+                data-icon="inline-start"
+                className={estado === "cargando" ? "animate-spin" : undefined}
+              />
+              Actualizar
+            </Button>
+          </>
+        }
+      >
+        <Recuento
+          valor={total}
+          texto={
+            filtrosActivos > 0
+              ? "filas guardadas con estos filtros"
+              : "filas guardadas"
+          }
+        />
+        {pendientesLocales > 0 && (
+          <span className="rounded-full bg-black/[0.06] px-2 py-0.5 text-muted-foreground tabular-nums dark:bg-white/[0.1]">
+            {n(pendientesLocales)} elegidos sin subir
           </span>
         )}
-      </div>
+      </BarraVista>
 
       {error && (
         <Alert variant="destructive">
-          <AlertTriangleIcon />
+          <WarningIcon weight="fill" />
           <AlertTitle>No se pudo leer Supabase</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
 
       {!disponible ? (
-        <Vacio>
-          La lectura estará disponible cuando Supabase esté configurado.
-        </Vacio>
+        <Vacio>Disponible cuando Supabase esté configurado.</Vacio>
       ) : filas.length === 0 && estado !== "cargando" ? (
-        <Vacio>No hay filas almacenadas que cumplan estos criterios.</Vacio>
+        <Vacio>No hay filas guardadas con estos filtros.</Vacio>
       ) : (
         <>
-          <Table aria-busy={estado === "cargando"}>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="text-right">id</TableHead>
-                <TableHead>Ciudad</TableHead>
-                <TableHead>
-                  <ConUnidad titulo="Fecha y hora" unidad="UTC" />
-                </TableHead>
-                <TableHead className="text-right">
-                  <ConUnidad titulo="Temperatura" unidad="°C" />
-                </TableHead>
-                <TableHead className="text-right">
-                  <ConUnidad titulo="Humedad" unidad="%" />
-                </TableHead>
-                <TableHead className="text-right">
-                  <ConUnidad titulo="Precipitación" unidad="mm" />
-                </TableHead>
-                <TableHead>
-                  <ConUnidad titulo="Importado en" unidad="UTC" />
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filas.map((f) => (
-                <TableRow key={f.id}>
-                  <TableCell className="text-right text-muted-foreground tabular-nums">
-                    {f.id}
-                  </TableCell>
-                  <TableCell>{f.ciudad}</TableCell>
-                  <TableCell>{celdaFecha(isoUtc(f.fecha_hora))}</TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {dec(f.temperatura_c)}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {dec(f.humedad_pct)}
-                  </TableCell>
-                  <TableCell className="text-right tabular-nums">
-                    {dec(f.precipitacion_mm)}
-                  </TableCell>
-                  <TableCell>{celdaFecha(isoUtc(f.importado_en))}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-          <Paginacion p={p} etiqueta="filas persistidas" />
+          <TablaDatos
+            filas={filas.map((f) => ({
+              ...f,
+              clave: String(f.id),
+              fecha_hora: isoUtc(f.fecha_hora),
+            }))}
+            orden={orden}
+            onOrden={ordenarPor}
+            ordenables={CAMPOS_REMOTOS}
+            despues={[
+              {
+                id: "importado_en",
+                titulo: "Subido (UTC)",
+                className: "text-muted-foreground tabular-nums",
+                celda: (f) => fechaUtc(isoUtc(f.importado_en)),
+              },
+            ]}
+          />
+          <Paginacion p={p} />
         </>
       )}
     </div>

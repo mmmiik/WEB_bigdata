@@ -1,19 +1,20 @@
 "use client"
 
-import { AlertTriangleIcon, DownloadCloudIcon, InfoIcon } from "lucide-react"
+import {
+  CheckCircleIcon,
+  CircleIcon,
+  InfoIcon,
+  PlayIcon,
+  WarningIcon,
+} from "@phosphor-icons/react"
 
-import { n } from "@/components/etl/comun"
+import { Fila, n, plural, Seccion } from "@/components/etl/comun"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { CIUDADES, type CiudadId } from "@/lib/etl/ciudades"
 import { VARIABLES_HORARIAS } from "@/lib/etl/extraccion"
-import {
-  FECHA_MINIMA_ARCHIVO,
-  MAX_DIAS_EXTRACCION,
-  type ValidacionPeriodo,
-} from "@/lib/etl/fechas"
+import { FECHA_MINIMA_ARCHIVO, type ValidacionPeriodo } from "@/lib/etl/fechas"
 import { cn } from "@/lib/utils"
 
 interface Props {
@@ -48,18 +49,14 @@ export function ConfiguracionExtraccion(props: Props) {
   const dias = periodo.dias ?? 0
   const registros = ciudades.length * dias * 24
   const valores = registros * VARIABLES_HORARIAS.length
+  const calculable = errores.length === 0
 
   return (
-    <div className="grid gap-5">
-      <p className="text-xs leading-relaxed text-muted-foreground">
-        API histórica de Open-Meteo · temperatura a 2 m, humedad relativa y
-        precipitación por horas · fechas en UTC.
-      </p>
-
-      <fieldset className="grid gap-2">
-        <div className="flex items-baseline justify-between">
-          <legend className="text-sm font-medium">Ciudades</legend>
-          <div className="flex gap-3 text-xs">
+    <div className="grid gap-4">
+      <Seccion
+        titulo="Ciudades"
+        accion={
+          <span className="flex gap-3">
             <Button
               variant="link"
               size="xs"
@@ -78,139 +75,129 @@ export function ConfiguracionExtraccion(props: Props) {
             >
               Ninguna
             </Button>
-          </div>
-        </div>
-        <div className="flex flex-wrap gap-1.5">
-          {CIUDADES.map((c) => {
-            const marcada = ciudades.includes(c.id)
-            return (
-              <button
-                key={c.id}
-                type="button"
-                aria-pressed={marcada}
-                disabled={props.ocupado}
-                title={`${c.latitud}, ${c.longitud}`}
-                onClick={() => props.onCiudades(alternarCiudad(ciudades, c.id))}
-                className={cn(
-                  "rounded-full border px-2.5 py-1 text-xs font-medium transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50",
-                  marcada
-                    ? "border-transparent bg-primary text-primary-foreground"
-                    : "border-black/10 text-muted-foreground hover:text-foreground dark:border-white/15"
-                )}
-              >
-                {c.nombre}
-              </button>
-            )
-          })}
-        </div>
-        <p className="text-xs text-muted-foreground">
-          También puedes elegirlas pulsando sobre el mapa.
-        </p>
-      </fieldset>
-
-      <fieldset className="grid gap-2">
-        <legend className="mb-2 text-sm font-medium">
-          Periodo{" "}
-          <span className="font-normal text-muted-foreground">
-            (máx. {MAX_DIAS_EXTRACCION} días)
           </span>
-        </legend>
-        <div className="grid grid-cols-2 gap-2">
-          <div className="grid gap-1">
-            <Label htmlFor="fecha-inicio" className="text-xs">
-              Desde
-            </Label>
-            <Input
-              id="fecha-inicio"
-              type="date"
-              value={props.inicio}
-              min={FECHA_MINIMA_ARCHIVO}
-              max={props.hoy}
+        }
+      >
+        {CIUDADES.map((c) => {
+          const marcada = ciudades.includes(c.id)
+          const Marca = marcada ? CheckCircleIcon : CircleIcon
+          return (
+            <button
+              key={c.id}
+              type="button"
+              aria-pressed={marcada}
               disabled={props.ocupado}
-              aria-invalid={periodo.errores.length > 0}
-              onChange={(e) => props.onInicio(e.target.value)}
-            />
-          </div>
-          <div className="grid gap-1">
-            <Label htmlFor="fecha-fin" className="text-xs">
-              Hasta (incluida)
-            </Label>
-            <Input
-              id="fecha-fin"
-              type="date"
-              value={props.fin}
-              min={FECHA_MINIMA_ARCHIVO}
-              max={props.hoy}
-              disabled={props.ocupado}
-              aria-invalid={periodo.errores.length > 0}
-              onChange={(e) => props.onFin(e.target.value)}
-            />
-          </div>
-        </div>
-      </fieldset>
+              title={`${c.latitud}, ${c.longitud}`}
+              onClick={() => props.onCiudades(alternarCiudad(ciudades, c.id))}
+              className="flex min-h-9 w-full items-center gap-2.5 px-3 py-1.5 text-left text-xs transition-colors outline-none hover:bg-black/[0.03] focus-visible:bg-black/[0.05] disabled:cursor-not-allowed disabled:opacity-60 dark:hover:bg-white/[0.04] dark:focus-visible:bg-white/[0.06]"
+            >
+              <Marca
+                aria-hidden
+                weight={marcada ? "fill" : "regular"}
+                className={cn(
+                  "size-[18px] shrink-0",
+                  marcada ? "text-blue-500" : "text-muted-foreground/50"
+                )}
+              />
+              <span className="flex-1">{c.nombre}</span>
+            </button>
+          )
+        })}
+      </Seccion>
 
-      <div className="rounded-xl bg-black/[0.04] p-3 text-xs dark:bg-white/[0.06]">
-        <p className="font-medium">Volumen previsto</p>
-        {errores.length === 0 ? (
-          <dl className="mt-1.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 tabular-nums">
-            <dt className="text-muted-foreground">Peticiones</dt>
-            <dd>{n(ciudades.length)} (una por ciudad)</dd>
-            <dt className="text-muted-foreground">Días</dt>
-            <dd>{n(dias)}</dd>
-            <dt className="text-muted-foreground">Registros</dt>
-            <dd>
-              {n(registros)}{" "}
-              <span className="text-muted-foreground">
-                = {ciudades.length} × {dias} × 24 h
-              </span>
-            </dd>
-            <dt className="text-muted-foreground">Valores</dt>
-            <dd>
-              {n(valores)}{" "}
-              <span className="text-muted-foreground">(3 variables)</span>
-            </dd>
-          </dl>
-        ) : (
-          <p className="mt-1 text-muted-foreground">
-            Corrige la configuración para calcularlo.
+      <Seccion titulo="Periodo">
+        <Fila etiqueta={<label htmlFor="fecha-inicio">Desde</label>}>
+          <InputFecha
+            {...props}
+            id="fecha-inicio"
+            value={props.inicio}
+            onChange={props.onInicio}
+          />
+        </Fila>
+        <Fila etiqueta={<label htmlFor="fecha-fin">Hasta, incluida</label>}>
+          <InputFecha
+            {...props}
+            id="fecha-fin"
+            value={props.fin}
+            onChange={props.onFin}
+          />
+        </Fila>
+      </Seccion>
+
+      <div className="grid gap-3">
+        {errores.length > 0 && (
+          <Alert variant="destructive">
+            <WarningIcon weight="fill" />
+            <AlertTitle>No se puede extraer todavía</AlertTitle>
+            <AlertDescription>
+              <ul className="list-disc pl-4">
+                {errores.map((e) => (
+                  <li key={e}>{e}</li>
+                ))}
+              </ul>
+            </AlertDescription>
+          </Alert>
+        )}
+        {errores.length === 0 && periodo.avisos.length > 0 && (
+          <Alert>
+            <InfoIcon weight="fill" />
+            <AlertTitle>Aviso</AlertTitle>
+            <AlertDescription>{periodo.avisos.join(" ")}</AlertDescription>
+          </Alert>
+        )}
+        {calculable && (
+          // Resumen del volumen previsto: una línea; el desglose, en el título.
+          <p
+            className="text-center text-xs text-muted-foreground"
+            title={`${n(dias)} días × 24 h × ${plural(ciudades.length, "ciudad", "ciudades")} = ${n(registros)} registros, ${n(valores)} valores`}
+          >
+            {plural(ciudades.length, "petición", "peticiones")} y {n(registros)}{" "}
+            registros previstos
           </p>
         )}
-      </div>
-
-      {errores.length > 0 && (
-        <Alert variant="destructive">
-          <AlertTriangleIcon />
-          <AlertTitle>No se puede extraer todavía</AlertTitle>
-          <AlertDescription>
-            <ul className="list-disc pl-4">
-              {errores.map((e) => (
-                <li key={e}>{e}</li>
-              ))}
-            </ul>
-          </AlertDescription>
-        </Alert>
-      )}
-      {errores.length === 0 && periodo.avisos.length > 0 && (
-        <Alert>
-          <InfoIcon />
-          <AlertTitle>Aviso</AlertTitle>
-          <AlertDescription>{periodo.avisos.join(" ")}</AlertDescription>
-        </Alert>
-      )}
-
-      <div className="grid gap-1.5">
         <Button
-          size="lg"
+          size="xl"
+          className="w-full shadow-md shadow-primary/30"
           disabled={errores.length > 0 || props.ocupado}
           onClick={props.onExtraer}
         >
-          <DownloadCloudIcon data-icon="inline-start" />
+          <PlayIcon weight="fill" data-icon="inline-start" />
           Extraer datos
         </Button>
         {props.ocupado && props.motivoOcupado && (
-          <p className="text-xs text-muted-foreground">{props.motivoOcupado}</p>
+          <p className="text-center text-xs text-muted-foreground">
+            {props.motivoOcupado}
+          </p>
         )}
       </div>
     </div>
+  )
+}
+
+/** Fecha compacta dentro de una fila, como el selector de fecha de iOS. */
+function InputFecha({
+  id,
+  value,
+  onChange,
+  hoy,
+  ocupado,
+  periodo,
+}: Props & {
+  id: string
+  value: string
+  onChange: (v: string) => void
+}) {
+  return (
+    <Input
+      id={id}
+      type="date"
+      value={value}
+      min={FECHA_MINIMA_ARCHIVO}
+      max={hoy}
+      disabled={ocupado}
+      aria-invalid={periodo.errores.length > 0}
+      onChange={(e) => onChange(e.target.value)}
+      className="h-7 w-auto rounded-md border-0 bg-black/[0.05] px-2 text-xs tabular-nums shadow-none dark:bg-white/[0.08]"
+    />
   )
 }
