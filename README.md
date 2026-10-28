@@ -130,6 +130,14 @@ La pestaña **«Datos en Supabase»** lee lo que realmente está persistido. Es
 paginada y permite filtrar por ciudad y fechas, ordenar y actualizar. Así se
 distingue lo persistido de los datos locales pendientes de subir.
 
+## Modo simulado (solo para ver la interfaz)
+
+Si Open-Meteo limita las peticiones (HTTP 429), abre `http://localhost:3000/?simulado`:
+las descargas se sustituyen por datos generados con la misma forma que la API
+(`lib/etl/simulacion.ts`). La interfaz muestra «Datos simulados» y la subida a
+Supabase queda bloqueada, para que esos datos nunca lleguen a la base de datos.
+Sin `?simulado`, la aplicación usa siempre la API real.
+
 ## Pruebas
 
 - `tests/pipeline.test.ts` y `tests/filtros-y-carga.test.ts` cubren:

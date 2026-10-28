@@ -1,6 +1,6 @@
 "use client"
 
-import { MoonIcon, SunIcon } from "lucide-react"
+import { MoonIcon, SunIcon } from "@phosphor-icons/react"
 import { useTheme } from "next-themes"
 
 import { Button } from "@/components/ui/button"
@@ -16,8 +16,8 @@ export function BotonTema() {
       onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
     >
       {/* Los dos iconos se pintan y el CSS elige: no depende del tema en el servidor. */}
-      <MoonIcon className="dark:hidden" />
-      <SunIcon className="hidden dark:block" />
+      <MoonIcon weight="fill" className="dark:hidden" />
+      <SunIcon weight="fill" className="hidden dark:block" />
     </Button>
   )
 }

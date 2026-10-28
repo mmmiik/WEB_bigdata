@@ -1,7 +1,10 @@
 "use client"
 
+import { IconContext } from "@phosphor-icons/react"
 import * as React from "react"
 import { ThemeProvider as NextThemesProvider, useTheme } from "next-themes"
+
+const ICONOS = { weight: "bold" } as const
 
 function ThemeProvider({
   children,
@@ -16,7 +19,8 @@ function ThemeProvider({
       {...props}
     >
       <ThemeHotkey />
-      {children}
+      {/* Trazo algo más grueso que el regular: a 14-16 px se lee como SF Symbols. */}
+      <IconContext.Provider value={ICONOS}>{children}</IconContext.Provider>
     </NextThemesProvider>
   )
 }

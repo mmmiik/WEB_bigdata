@@ -2,8 +2,8 @@
 
 import "maplibre-gl/dist/maplibre-gl.css"
 
-import { MinusIcon, PlusIcon, ScanIcon } from "lucide-react"
-import type { Map as MapaMapLibre } from "maplibre-gl"
+import { FrameCornersIcon, MinusIcon, PlusIcon } from "@phosphor-icons/react"
+import type { FilterSpecification, Map as MapaMapLibre } from "maplibre-gl"
 import { useTheme } from "next-themes"
 import * as React from "react"
 import { createPortal } from "react-dom"
@@ -18,11 +18,27 @@ const CLAVE_MAPTILER = process.env.NEXT_PUBLIC_MAPTILER_KEY?.trim()
 
 type Tema = "light" | "dark"
 
-/** Estilos en escala de grises: mar gris claro / casi negro, nunca azul. */
+/**
+ * Claro: mapa topográfico (vegetación, relieve sombreado y mar azul).
+ * Oscuro: imagen de satélite atenuada, como una vista nocturna.
+ */
 const ESTILOS: Record<Tema, string> = {
-  light: "dataviz-light",
-  dark: "dataviz-dark",
+  light: "topo-v2",
+  dark: "satellite",
 }
+
+/** Brillo máximo del satélite en oscuro: deja leer las cajas de vidrio encima. */
+const BRILLO_SATELITE = 0.72
+
+/** Capas de rótulos de ciudad del mapa base (filtros en sintaxis clásica). */
+const CAPAS_ROTULOS = /^(City|Town) labels$/
+
+/** Rótulos que ya pintan nuestros botones, en nombre local e inglés. */
+const ROTULOS_DUPLICADOS = [
+  ...CIUDADES.map((c) => c.nombre),
+  "Seville",
+  "València",
+]
 
 const urlEstilo = (tema: Tema) =>
   `https://api.maptiler.com/maps/${ESTILOS[tema]}/style.json?key=${CLAVE_MAPTILER}`
@@ -105,12 +121,35 @@ export function MapaEspana({
       m.keyboard.disableRotation()
       m.on("error", (e) => {
         const estado = (e.error as { status?: number } | undefined)?.status
-        if (estado === 401 || estado === 403)
+        if (estado === 401 || estado === 403) {
           setError(
             "MapTiler ha rechazado la clave (¿es correcta y está permitido este dominio?)."
           )
-        // Con un manejador propio maplibre deja de mostrar el error en consola.
-        console.error("[mapa]", e.error)
+          console.error("[mapa]", e.error)
+          return
+        }
+        // Una tesela que no llega (red, petición cancelada al hacer zoom) no
+        // rompe el mapa: maplibre la vuelve a pedir. Solo se anota.
+        console.warn("[mapa]", e.error)
+      })
+      // Se dispara al crear el mapa y en cada cambio de estilo (tema).
+      m.on("style.load", () => {
+        for (const capa of m!.getStyle().layers)
+          if (CAPAS_ROTULOS.test(capa.id) && capa.type === "symbol")
+            m!.setFilter(capa.id, [
+              "all",
+              capa.filter ?? ["has", "name"],
+              ["!in", "name", ...ROTULOS_DUPLICADOS],
+              ["!in", "name:en", ...ROTULOS_DUPLICADOS],
+            ] as FilterSpecification)
+        if (estiloAplicado.current !== "dark") return
+        for (const capa of m!.getStyle().layers)
+          if (capa.type === "raster")
+            m!.setPaintProperty(
+              capa.id,
+              "raster-brightness-max",
+              BRILLO_SATELITE
+            )
       })
 
       const lista = CIUDADES.map((ciudad) => {
@@ -164,7 +203,8 @@ export function MapaEspana({
   return (
     <div
       className={cn(
-        "relative overflow-hidden bg-[hsl(240_2%_88%)] dark:bg-[hsl(0_0%_8%)]",
+        // Color del mar de cada estilo mientras cargan las teselas.
+        "relative overflow-hidden bg-[hsl(199_44%_59%)] dark:bg-[hsl(214_45%_9%)]",
         // La atribución queda en el hueco central, no debajo de las cajas.
         "[&_.maplibregl-ctrl-bottom-right]:right-(--margen-dcho)!",
         // maplibre pinta la atribución en blanco; en oscuro se adapta.
@@ -200,20 +240,22 @@ export function MapaEspana({
         )
       )}
 
-      <div
-        className="pointer-events-none absolute flex justify-center px-2"
-        style={{ top: 16, left, right }}
-      >
-        <p
-          className={cn(
-            "rounded-full px-3 py-1 text-xs",
-            VIDRIO,
-            error ? "text-red-700 dark:text-red-300" : "text-muted-foreground"
-          )}
+      {error && (
+        <div
+          className="pointer-events-none absolute flex justify-center px-2"
+          style={{ top: 16, left, right }}
         >
-          {error ?? "Pulsa una ciudad para incluirla o quitarla"}
-        </p>
-      </div>
+          <p
+            role="alert"
+            className={cn(
+              "rounded-full px-3 py-1 text-xs text-red-700 dark:text-red-300",
+              VIDRIO
+            )}
+          >
+            {error}
+          </p>
+        </div>
+      )}
 
       {mapa && (
         <div
@@ -242,7 +284,7 @@ export function MapaEspana({
               aria-label="Ver toda España"
               onClick={reencuadrar}
             >
-              <ScanIcon />
+              <FrameCornersIcon />
             </Button>
             <Button
               variant="ghost"
@@ -288,7 +330,7 @@ function BotonCiudad({
         // Evita que un doble clic sobre el botón acerque el mapa.
         onDoubleClick={(e) => e.stopPropagation()}
         className={cn(
-          "flex cursor-pointer items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed",
+          "flex cursor-pointer items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold tracking-[-0.01em] transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed",
           VIDRIO,
           seleccionada
             ? "border-white/30 bg-zinc-900/70 text-white dark:border-white/50 dark:bg-white/75 dark:text-zinc-900"
