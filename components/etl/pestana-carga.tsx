@@ -96,8 +96,6 @@ interface Props {
   totalValidos: number
   onSubirTodos: () => void
   onReintentar: () => void
-  /** Si existe, la subida está desactivada por este motivo. */
-  bloqueo?: string
 }
 
 export function PestanaCarga({
@@ -109,26 +107,19 @@ export function PestanaCarga({
   totalValidos,
   onSubirTodos,
   onReintentar,
-  bloqueo,
 }: Props) {
   // Durante una carga se muestra la copia congelada que realmente se envía.
   const filas = enCurso && carga ? carga.snapshot : paraCargar
   const p = usePaginacion(filas.length)
   const visibles = paginar(filas as RegistroCarga[], p.pagina, p.tamano)
   const disponible =
-    supabase?.configurado === true && supabase.tablaAccesible && !bloqueo
+    supabase?.configurado === true && supabase.tablaAccesible
   const nLotes = Math.ceil(filas.length / TAMANO_LOTE)
   const desde = (p.pagina - 1) * p.tamano
 
   return (
     <div className="grid gap-3">
       <AvisoSupabase estado={supabase} />
-      {bloqueo && (
-        <Alert>
-          <LockSimpleIcon weight="fill" />
-          <AlertTitle>{bloqueo}</AlertTitle>
-        </Alert>
-      )}
 
       <BarraVista
         acciones={

@@ -130,14 +130,6 @@ La pestaña **«Datos en Supabase»** lee lo que realmente está persistido. Es
 paginada y permite filtrar por ciudad y fechas, ordenar y actualizar. Así se
 distingue lo persistido de los datos locales pendientes de subir.
 
-## Modo simulado (solo para ver la interfaz)
-
-Si Open-Meteo limita las peticiones (HTTP 429), abre `http://localhost:3000/?simulado`:
-las descargas se sustituyen por datos generados con la misma forma que la API
-(`lib/etl/simulacion.ts`). La interfaz muestra «Datos simulados» y la subida a
-Supabase queda bloqueada, para que esos datos nunca lleguen a la base de datos.
-Sin `?simulado`, la aplicación usa siempre la API real.
-
 ## Pruebas
 
 - `tests/pipeline.test.ts` y `tests/filtros-y-carga.test.ts` cubren:
@@ -154,5 +146,7 @@ Sin `?simulado`, la aplicación usa siempre la API real.
   extracciones reales.
 - `tests/integracion/open-meteo.test.ts` usa la API real: una ciudad
   durante un día devuelve 24 registros horarios en UTC.
-- Pendiente con credenciales: la carga real en Supabase, la segunda carga
-  contra la restricción única real y la verificación de claves en destino.
+- Carga real en Supabase realizada: la tabla contiene 3600 registros
+  (5 ciudades × 30 días × 24 horas de septiembre de 2026).
+- Pendiente: la aplicación no tiene autenticación; está pensada para
+  ejecutarse en local y requiere proteger los endpoints antes de publicarse.

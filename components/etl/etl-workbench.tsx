@@ -71,7 +71,6 @@ import {
   type ExtraccionCiudad,
 } from "@/lib/etl/extraccion"
 import { hoyUtc, validarPeriodo } from "@/lib/etl/fechas"
-import { fetchSimulado } from "@/lib/etl/simulacion"
 import {
   filtrar,
   FILTROS_INICIALES,
@@ -187,22 +186,12 @@ function usePantallaAncha() {
   )
 }
 
-/** «?simulado» en la URL: Open-Meteo se sustituye por datos generados. */
-function useModoSimulado() {
-  return React.useSyncExternalStore(
-    () => () => {},
-    () => new URLSearchParams(window.location.search).has("simulado"),
-    () => false
-  )
-}
-
 // Ancho de las cajas (lg:w-[340px] y lg:w-[400px]) + separación de 16 px + aire.
 const MARGENES_ANCHA: Margenes = { top: 64, bottom: 96, left: 380, right: 440 }
 const MARGENES_ESTRECHA: Margenes = { top: 56, bottom: 88, left: 16, right: 16 }
 
 export function EtlWorkbench() {
   const [hoy] = React.useState(() => hoyUtc())
-  const simulado = useModoSimulado()
   const [ciudadesSel, setCiudadesSel] = React.useState<CiudadId[]>(
     CIUDADES.map((c) => c.id)
   )
@@ -305,10 +294,7 @@ export function EtlWorkbench() {
       intentos: previa.intentos + 1,
     })
     const t0 = performance.now()
-    const r = await descargarCiudad(
-      previa.url,
-      simulado ? fetchSimulado : undefined
-    )
+    const r = await descargarCiudad(previa.url)
     const duracionMs = performance.now() - t0
     // Al reintentar se REEMPLAZA la respuesta de la ciudad: nunca se acumula.
     actualizarExtraccion(id, {
@@ -394,11 +380,6 @@ export function EtlWorkbench() {
     setFiltros(FILTROS_INICIALES)
     setExtrayendo(true)
     setPestana("json")
-    if (simulado)
-      anotar(
-        "info",
-        "Modo simulado: datos generados, sin llamar a Open-Meteo. La subida está desactivada."
-      )
     anotar(
       "info",
       `Extracción de ${plural(ciudades.length, "ciudad", "ciudades")}, del ${fechaCorta(inicio)} al ${fechaCorta(fin)}`
@@ -512,8 +493,6 @@ export function EtlWorkbench() {
   }
 
   const conBloqueo = async (fn: () => Promise<void>) => {
-    // Los datos simulados nunca llegan a la base de datos.
-    if (simulado) return
     // Impide envíos simultáneos aunque se pulse dos veces muy rápido.
     if (cargaEnCursoRef.current) return
     cargaEnCursoRef.current = true
@@ -556,11 +535,7 @@ export function EtlWorkbench() {
 
   const supabaseDisponible =
     supabase?.configurado === true && supabase.tablaAccesible
-  /** Motivo por el que no se puede subir aunque Supabase esté disponible. */
-  const bloqueoSubida = simulado
-    ? "Modo simulado: estos datos no se pueden subir"
-    : undefined
-  const puedeSubir = supabaseDisponible && !bloqueoSubida
+  const puedeSubir = supabaseDisponible
   // Sin selección, la caja de subida ofrece subir todos los válidos.
   const eligiendo = paraCargar.length > 0
   const aSubir = eligiendo ? paraCargar.length : validos.length
@@ -848,17 +823,7 @@ export function EtlWorkbench() {
           <Caja
             titulo="Configuración"
             accion={
-              <span className="flex items-center gap-2">
-                {simulado && (
-                  <span
-                    className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:text-amber-300"
-                    title="Open-Meteo se sustituye por datos generados. Quita «?simulado» de la URL para usar la API real."
-                  >
-                    Datos simulados
-                  </span>
-                )}
-                <BotonTema />
-              </span>
+              <BotonTema />
             }
             className="lg:shrink-0"
           >
@@ -917,8 +882,7 @@ export function EtlWorkbench() {
               </span>
               {local && (
                 <span className="text-xs text-muted-foreground">
-                  {bloqueoSubida ??
-                    (eligiendo ? "Los que has elegido" : "Todos los válidos")}
+                  {eligiendo ? "Los que has elegido" : "Todos los válidos"}
                 </span>
               )}
               {fueraDeFiltros > 0 && (
@@ -1055,7 +1019,6 @@ export function EtlWorkbench() {
               totalValidos={validos.length}
               onSubirTodos={subirTodos}
               onReintentar={reintentarLotes}
-              bloqueo={bloqueoSubida}
             />
           ),
           supabase: (
